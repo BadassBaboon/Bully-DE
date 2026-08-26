@@ -2,6 +2,7 @@
 #include "../Config.h"
 #include "../Logger.h"
 #include "../Memory.h"
+#include "../Patch.h"
 #include <cstring>
 
 // ---------------------------------------------------------------------------
@@ -62,44 +63,6 @@ constexpr uint32_t  kStr_VSM           = 0x00951654; // "NiVSMShadowTechnique"
 // --- CShadows::Render (legacy 2D blob decals) -------------------------------
 constexpr uintptr_t kBlobShadowRender = 0x005251C0; // 83 EC 20  sub esp, 20h
 
-// Verify a patch site still holds its expected vanilla bytes before writing.
-bool VerifySite(const char* what, uintptr_t addr, const uint8_t* expected, size_t size) {
-    const auto* actual = reinterpret_cast<const uint8_t*>(addr);
-    for (size_t i = 0; i < size; ++i) {
-        if (actual[i] != expected[i]) {
-            Logger::Get().Error("ShadowFix",
-                "Signature mismatch for {} at 0x{:08X} (byte {}: expected 0x{:02X}, found 0x{:02X}). Skipping.",
-                what, addr, i, expected[i], actual[i]);
-            return false;
-        }
-    }
-    return true;
-}
-
-bool PatchWord(const char* what, uintptr_t addr, uint16_t expectedOld, uint16_t value) {
-    if (!VerifySite(what, addr, reinterpret_cast<const uint8_t*>(&expectedOld), sizeof(expectedOld))) {
-        return false;
-    }
-    if (!Memory::Write<uint16_t>(addr, value)) {
-        Logger::Get().Error("ShadowFix", "Write failed for {} at 0x{:08X}", what, addr);
-        return false;
-    }
-    Logger::Get().Info("ShadowFix", "{} @ 0x{:08X}: {} -> {}", what, addr, expectedOld, value);
-    return true;
-}
-
-bool PatchDword(const char* what, uintptr_t addr, uint32_t expectedOld, uint32_t value) {
-    if (!VerifySite(what, addr, reinterpret_cast<const uint8_t*>(&expectedOld), sizeof(expectedOld))) {
-        return false;
-    }
-    if (!Memory::Write<uint32_t>(addr, value)) {
-        Logger::Get().Error("ShadowFix", "Write failed for {} at 0x{:08X}", what, addr);
-        return false;
-    }
-    Logger::Get().Info("ShadowFix", "{} @ 0x{:08X}: {} -> {}", what, addr, expectedOld, value);
-    return true;
-}
-
 } // namespace
 
 bool ShadowFix::Install() {
@@ -116,9 +79,9 @@ bool ShadowFix::Install() {
     //    point, but if these fail the size hint below is silently truncated,
     //    so they are logged as their own step.
     if (res > 2048) {
-        PatchDword("2D shadow map dimension clamp", kClamp2D_Imm,   2048, res);
-        PatchDword("Cube shadow map clamp (cmp)",   kClampCube_Cmp, 2048, res);
-        PatchDword("Cube shadow map clamp (mov)",   kClampCube_Mov, 2048, res);
+        Patch::Dword("2D shadow map dimension clamp", kClamp2D_Imm,   2048, res);
+        Patch::Dword("Cube shadow map clamp (cmp)",   kClampCube_Cmp, 2048, res);
+        Patch::Dword("Cube shadow map clamp (mov)",   kClampCube_Mov, 2048, res);
     }
 
     // 2. The runtime per-light override. This is the one that actually decides
@@ -126,7 +89,7 @@ bool ShadowFix::Install() {
     //    that never pass through sub_40FB30.
     {
         const uint8_t vanilla[] = { 0x66, 0x8B, 0x4A, 0x7A }; // mov cx, [edx+7Ah]
-        if (VerifySite("Per-light size hint load", kRuntimeSizeHintLoad, vanilla, sizeof(vanilla))) {
+        if (Patch::Verify("Per-light size hint load", kRuntimeSizeHintLoad, vanilla, sizeof(vanilla))) {
             uint8_t patched[4] = { 0x66, 0xB9, 0, 0 };        // mov cx, imm16
             const uint16_t imm = static_cast<uint16_t>(res);
             memcpy(patched + 2, &imm, sizeof(imm));
@@ -140,9 +103,9 @@ bool ShadowFix::Install() {
     }
 
     // 3. Size hints -- the value NiShadowManager reads to size the map.
-    PatchWord("Bully shadow generator size hint", kSizeHint_BullySetup, 1024, static_cast<uint16_t>(res));
-    PatchWord("NiShadowGenerator ctor size hint", kSizeHint_Ctor1,      1024, static_cast<uint16_t>(res));
-    PatchWord("NiShadowGenerator ctor size hint", kSizeHint_Ctor2,      1024, static_cast<uint16_t>(res));
+    Patch::Word("Bully shadow generator size hint", kSizeHint_BullySetup, 1024, static_cast<uint16_t>(res));
+    Patch::Word("NiShadowGenerator ctor size hint", kSizeHint_Ctor1,      1024, static_cast<uint16_t>(res));
+    Patch::Word("NiShadowGenerator ctor size hint", kSizeHint_Ctor2,      1024, static_cast<uint16_t>(res));
 
     // 4. Shadow map memory budget. Vanilla is 64 MB, sized for 8 generators at
     //    1024x1024. Every doubling of resolution quadruples the requirement; if
@@ -150,7 +113,7 @@ bool ShadowFix::Install() {
     //    starts returning null, dropping shadows at distance.
     const uint32_t generators = config.shadowGeneratorCount;
     if (generators != 8) {
-        PatchDword("Shadow generator count", kGeneratorCount_Imm, 8, generators);
+        Patch::Dword("Shadow generator count", kGeneratorCount_Imm, 8, generators);
     }
 
     // 4 bytes per texel covers the widest format the switch in sub_7575D0
@@ -165,7 +128,7 @@ bool ShadowFix::Install() {
     }
     if (budget > 0xC0000000ull) budget = 0xC0000000ull; // never exceed 3 GB
     if (budget < 0x4000000ull)  budget = 0x4000000ull;  // never shrink below vanilla
-    PatchDword("Shadow map memory budget", kShadowBudget_Imm, 0x4000000u, static_cast<uint32_t>(budget));
+    Patch::Dword("Shadow map memory budget", kShadowBudget_Imm, 0x4000000u, static_cast<uint32_t>(budget));
     Logger::Get().Info("ShadowFix", "Shadow map is {} MB each; budget {} MB ({} generators)",
         perMap / (1024 * 1024), budget / (1024 * 1024), generators);
     if (budget > (1024ull * 1024ull * 1024ull)) {
@@ -185,7 +148,7 @@ bool ShadowFix::Install() {
         techniqueName = "NiVSMShadowTechnique";
     }
     if (techniqueStr != kStr_PCF) {
-        PatchDword("Shadow technique", kTechniquePush_Imm, kStr_PCF, techniqueStr);
+        Patch::Dword("Shadow technique", kTechniquePush_Imm, kStr_PCF, techniqueStr);
     }
     Logger::Get().Info("ShadowFix", "Shadow technique: {}", techniqueName);
 
@@ -194,7 +157,7 @@ bool ShadowFix::Install() {
     //    the blobs leaves them with no ground contact at all.
     if (config.disableBlobShadows) {
         const uint8_t vanilla[] = { 0x83, 0xEC, 0x20 };
-        if (VerifySite("CShadows::Render", kBlobShadowRender, vanilla, sizeof(vanilla))) {
+        if (Patch::Verify("CShadows::Render", kBlobShadowRender, vanilla, sizeof(vanilla))) {
             if (Memory::Write<uint8_t>(kBlobShadowRender, 0xC3)) {
                 Logger::Get().Info("ShadowFix", "Disabled 2D blob shadow decals (CShadows::Render -> ret)");
             }

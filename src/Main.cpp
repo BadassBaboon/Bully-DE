@@ -4,6 +4,8 @@
 #include "Logger.h"
 #include "UnpackHook.h"
 #include "features/ShadowFix.h"
+#include "features/BloomFix.h"
+#include "features/Diagnostics.h"
 
 namespace {
     HMODULE g_hModule = nullptr;
@@ -37,6 +39,8 @@ namespace {
         // Register post-unpack hook to install shadow resolution patches directly in Gamebryo engine memory
         BullyDE::UnpackHook::Register([]() {
             BullyDE::ShadowFix::Install();
+            BullyDE::BloomFix::Install();
+            BullyDE::Diagnostics::Install();
         });
     }
 }

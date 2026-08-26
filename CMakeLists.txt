@@ -22,10 +22,16 @@ add_library(${PROJECT_NAME} SHARED
     src/Logger.h
     src/Memory.cpp
     src/Memory.h
+    src/Patch.cpp
+    src/Patch.h
     src/UnpackHook.cpp
     src/UnpackHook.h
     src/features/ShadowFix.cpp
     src/features/ShadowFix.h
+    src/features/BloomFix.cpp
+    src/features/BloomFix.h
+    src/features/Diagnostics.cpp
+    src/features/Diagnostics.h
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
