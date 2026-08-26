@@ -161,6 +161,147 @@ Raising the resolution shrinks each texel, so a bias tuned for 1024 is larger
 than it needs to be at 8192; if shadows detach from the base of objects, this is
 where to look.
 
+## Bloom
+
+Bloom is a separate effect from the timecycle glow, and this caught me out once:
+`GlowThresh` and `GlowStrength` in the timecycle feed `ScrFX_Glow` and
+`ScrFX_Luminance`, not `ScrFX_Bloom`. Bloom parameters come from a **per-area**
+table at `dword_CF0A68` (24-byte stride, area id 0-63), copied each frame into
+`dword_AC7608` (enable), `AC760C` (threshold, 230), `AC7610` (strength, 80) and
+`AC7614` (scale, 4). Patching those globals does not stick.
+
+`sub_560480` runs the chain: threshold (pass 2), blur horizontal and vertical
+(pass 7 twice), composite (pass 1).
+
+### Sample count is not the knob
+
+Both bloom pixel shaders are 58 instructions with **13 `texld`** and contain no
+`LOOP` or `REP` instruction. The blur is fully unrolled, so `BLUR_SAMPLES` is a
+compile-time constant read back from the effect only to size the kernel array the
+C++ uploads. It cannot be raised at runtime, and 13 taps per axis is already
+generous -- more taps on a wide kernel makes it smoother, not sharper.
+
+### The radius is the knob
+
+`sub_560480` builds each kernel entry as `offset = tapIndex / divisor`, where the
+divisor is the screen dimension shifted right by two:
+
+```
+5605E7: call sub_405BA0     ; screen dims
+5605EC: mov  eax, [eax]     ; width
+5605EE: cdq
+5605EF: and  edx, 3
+5605F2: add  eax, edx
+5605F4: C1 F8 02  sar eax, 2   ; divisor = width / 4     <- horizontal
+...
+56071B: C1 F8 02  sar eax, 2   ; divisor = height / 4    <- vertical
+```
+
+With 13 taps that is a +/-24 full-res pixel radius per axis. Lowering the shift
+tightens it: `2 -> 1` halves the radius, `2 -> 0` quarters it. The shift
+immediates are at `0x5605F6` and `0x56071D`.
+
+Only the shift byte needs changing. The `and edx, 3` above it is the compiler's
+signed-division rounding fixup; screen dimensions are always positive, so `edx`
+is zero and the mask is inert regardless of the shift.
+
+
+## Depth of field: investigated and abandoned
+
+Bully SE ships `ScrFX_DepthOfField` as screen-effect pass 4, run by `sub_5601F0`.
+Three separate things were wrong with it, all of them were fixed, and the effect
+still never appeared on screen. The work is recorded here so nobody repeats it.
+
+### What the effect looks like in the binary
+
+| Thing | Address | State |
+|---|---|---|
+| Effect name table entry | `0xAC7644 + 4*4` | `"ScrFX_DepthOfField.fxl"`, pass index 4 |
+| Runner | `sub_5601F0` | binds `gBlurTexture`, sets pixel sizes and `gBlurStrength`, runs pass 4 |
+| Master enable | `dword_AC7624` | ships as **1** |
+| Blur strength | `byte_AC7628` | ships as **120**, uploaded as `gBlurStrength = n / 255` |
+| Blur source | `dword_CF12EC` | filled by `sub_55FDE0`, the gaussian pass (13 offsets, 13 weights, pass 6) |
+
+Note `sub_55FDE0` and `sub_55DFE0` are different functions with confusingly
+similar names. The first renders the blur texture; the second is the screen
+effect defaults reset that writes `dword_AC7624 = 1` and `byte_AC7628 = 120`.
+Patching those globals directly does not stick, because the reset runs on load.
+
+### Problem 1: the area gate
+
+The dispatcher only calls `sub_5601F0` when a per-area byte is set:
+
+```
+55E4E9: cmp  dword_AC7624, ebp   ; master enable, ships as 1
+55E4EF: jz   skip
+55E4F1: mov  ecx, flt_BD1008     ; current area id
+55E4F8: call sub_430320          ; return byte_901DD0[areaId]
+55E500: test al, al
+55E502: jz   skip                ; 74 10
+55E50C: call sub_5601F0
+```
+
+`sub_430320` is nothing but `return byte_901DD0[a1]`. That 64-entry table has
+**six** entries set -- areas 0, 1, 22, 31, 42 and 43. Everywhere else the effect
+is skipped.
+
+NOPping the `74 10` at `0x55E502` removes the gate. Doing it there rather than
+filling the table matters: `sub_40FB30` calls the same `sub_430320` predicate to
+drive a lighting path, so rewriting the table changes area lighting too.
+
+**Result: no visible change.**
+
+### Problem 2: gBlurTexturePixelSize is never uploaded
+
+`sub_5601F0` looks up both pixel-size constants and keeps only the first:
+
+```
+560275: push "gSceneTexturePixelSize"
+56027D: call edx        ; -> eax
+560284: mov  edi, eax   ; edi = SCENE handle, saved before the second lookup
+56027F: push "gBlurTexturePixelSize"
+56028E: call ecx        ; -> eax, immediately clobbered, never stored
+5602F4: push edi        ; SetVector(scene, 0.25/dim)   <- meant for the blur texture
+56031B: push edi        ; SetVector(scene, 1.0/dim)
+```
+
+`edi` carries the scene handle into both `SetVector` calls, so
+`gSceneTexturePixelSize` is written twice and `gBlurTexturePixelSize` never
+reaches the shader. The blur texture is quarter resolution, which is what the
+discarded `0.25/dim` vector was for. This is a real shipped bug, confirmed in raw
+disassembly rather than decompiler output.
+
+It was fixed with two code caves: one storing the discarded handle at
+`0x560290` (5 stolen bytes), one pushing it in place of `edi` at `0x5602EF`
+(7 stolen bytes). `ebx` is unused across the whole function but is callee-saved,
+so the handle went to a static rather than a register.
+
+**Result: no visible change, at blur strength 120 and at 255.**
+
+### Problem 3: ruled out by measurement
+
+A read-only sampling thread confirmed that during normal gameplay the
+dispatcher's two early-outs (`byte_BCBB53` at `0x55E2C3` and `byte_C1A998` at
+`0x55E2D0`) are both clear, the area id is in range, the master enable reads 1,
+the strength reads what was patched, and the blur texture source is non-null
+with its ready flag set. Every gate is open and the effect still produces
+nothing.
+
+### Where it stands
+
+The remaining candidate is the shader itself. `ScrFX_DepthOfField` contains two
+pixel shaders: 4 instructions with 1 `texld`, and 12 instructions with 2 `texld`.
+Two texture reads is too few for scene plus blur plus depth, so the
+`DefaultTechnique` may have no depth term at all -- in which case this was never
+distance depth of field, only a scripted full-screen blur, and the effect seen on
+PS2 and Wii does not exist in this engine.
+
+Settling that means disassembling the shader bytecode rather than reading its
+constant names. Nobody has done it. The three fixes above are correct as far as
+they go and are recorded here; the feature code was removed from the mod because
+it changed nothing a player can see.
+
+
 ## Things that were tried and did not work
 
 **The jitter texture.** `Graphics\NormalizedRandomDirections.tga` is 512x512, and
