@@ -1,0 +1,68 @@
+# Build output
+build*/
+out/
+cmake-build-*/
+bin/
+Debug/
+Release/
+*.asi
+*.dll
+*.exe
+*.obj
+*.o
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.tlog
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+compile_commands.json
+Makefile
+*.dir/
+*.cmake
+!CMakeLists.txt
+
+# Runtime output written next to the .asi
+Bully-DE.log
+*.log
+
+# Editor / IDE
+.vs/
+.vscode/
+.idea/
+.claude/
+*.vcxproj.user
+*.vcxproj.filters
+*.VC.db
+*.suo
+*.user
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Backups and scratch
+*.bak
+*.orig
+*.rej
+scratch/
+tmp/
+
+# Reverse engineering working files: IDA databases and memory dumps of the game.
+# These are large and are not ours to redistribute.
+*.idb
+*.i64
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+*.map
+*.dmp
+*_unpacked.exe
