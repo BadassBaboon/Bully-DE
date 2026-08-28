@@ -304,9 +304,10 @@ it changed nothing a player can see.
 
 ## Draw distance, LOD and population
 
-All of this was derived from `Bully.exe` directly. Where a patch site came from
-elsewhere, the instruction at that address was disassembled and the replacement
-checked against what it actually does before being trusted -- see
+Every address here was found in `Bully.exe` and every patch was checked the same
+way: disassemble the instruction at the site, work out what the replacement
+actually does, and only then trust it. The cases where that check was skipped are
+recorded in
 [Patches that looked right and were not](#patches-that-looked-right-and-were-not).
 
 ### LOD object pools
@@ -400,8 +401,8 @@ distant coplanar surfaces; against 600 m it is 2400:1 and within budget.
 ### Distance culling
 
 `0x5111D0` and `0x51175E` are early-out jumps. Both were checked before being
-NOPed, because bypassing a validity check and bypassing a distance check look
-identical in a patch list:
+NOPed, because bypassing a validity check and bypassing a distance check are
+indistinguishable without reading the instructions that set the flags:
 
 ```
 5111C3: faddp          ; dx*dx + dy*dy
@@ -484,10 +485,11 @@ index, and into `gMotionBlurTexture`.
 
 ## Patches that looked right and were not
 
-Every one of these applied cleanly, matched its expected vanilla bytes, and did
-something other than what its comment claimed. They are recorded because the
-failure mode is consistent: the bytes were reproduced without reproducing the
-reasoning, and a patch list alone cannot show the difference.
+Every one of these applied cleanly and matched its expected vanilla bytes, and
+every one did something other than what it was believed to do. They are recorded
+because the failure mode is consistent: an address and a replacement byte string
+are not enough to tell you what a patch does. Only the disassembly at that
+address is, and each of these was written without checking it.
 
 **`0x5E6837`, described as redirecting a branch.** The byte is not an opcode. It
 is the displacement of `jz short loc_5E6841` at `0x5E6836`:
@@ -518,12 +520,13 @@ Replacing them with a write to `[eax+4]` leaves `+8`, `+0Ch` and `+10h` holding
 whatever was in the freshly allocated struct. The cited mechanism was wrong too:
 `sub_410320` is the debug string formatter, not a radius accumulator.
 
-**The uniform-name blanking, described as unhooking.** The mechanism was sound;
-only the length was wrong, by exactly four bytes at both sites. This one is
-recorded separately from the two above because it was initially removed outright
-on the assumption that the whole approach was broken. It was not. The lesson cuts
-both ways: finding a real bug next to a plausible-sounding second claim is not
-licence to delete the feature without testing that second claim too.
+**The uniform-name blanking.** The mechanism was sound; only the length was
+wrong, by exactly four bytes at both sites. This one is recorded separately from
+the others because the first response to finding the overrun was to remove the
+whole feature, on the untested assumption that blanking a uniform name could not
+disable an effect at all. It can, and it did. The lesson cuts both ways: finding
+one real bug is not licence to act on a second, plausible-sounding claim without
+testing that one too.
 
 **`0x7594B4` and `0x7594C3`, believed to be a shadow map pool resolution.** They
 are an `NiTArray` element count -- `sub_776B50` allocates `4 * n` bytes for a
