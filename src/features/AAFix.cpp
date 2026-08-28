@@ -11,17 +11,19 @@ namespace {
 
 // There is deliberately no "flickering texture" fix here.
 //
-// The patch this was ported from wrote 0xEB over 0x005E6837, which is not an
-// opcode but the displacement of an existing `jz short loc_5E6841` at
+// An earlier attempt wrote 0xEB over 0x005E6837, which is not an opcode but the
+// displacement of an existing `jz short loc_5E6841` at
 // 0x5E6836. That retargets the jump to 0x5E6923 -- inside a different function
 // (sub_5E6920) and in the middle of `mov edi, ecx`, so execution resumed on the
 // 0xF9 byte as `stc`, ran that function's body without its prologue, and hit a
 // pop-based epilogue against the wrong stack frame.
 //
 // No displacement from that jz can express a correct fix; every reachable
-// target is inside sub_5E6510 or past its end. The upstream mod's own
-// documentation also states that removing all flickering requires replacement
-// textures, so this is not something an ASI can deliver on its own.
+// target is inside sub_5E6510 or past its end.
+//
+// Flickering under MSAA is also not purely a code problem -- it comes from the
+// alpha-tested textures themselves, so it is not something an ASI can fix on
+// its own regardless of where the patch goes.
 
 // Vegetation & Wire Fence Alpha-To-Coverage (ATOC/A2M) Fix
 // sub_8826E0 initializes hardware Alpha-To-Coverage (NVIDIA ATOC / ATI A2M).

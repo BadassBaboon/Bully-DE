@@ -371,6 +371,19 @@ __declspec(naked) static void Hook_RadarBlipFilter() {
 constexpr uintptr_t kNiCameraFrustumSite = 0x00762DDF;
 static float s_customFarClipFloat = 600.0f; // kept in step with s_customFarClip below
 
+// Near plane. The engine ships 0.25 m, which is far closer than anything is ever
+// drawn and costs depth precision for nothing. What matters is the ratio: the
+// timecycle carries a NearFarRatio column set to 2500 and Gamebryo tracks
+// m_fMaxFarNearRatio, so far/near beyond roughly 2500:1 starts Z-fighting on
+// distant coplanar surfaces -- road markings, fence panels, building faces.
+//
+//   near 0.25 with far 1500  = 6000:1   well past budget
+//   near 1.00 with far 1500  = 1500:1   comfortable
+//
+// Nothing is visible at 0.25 m that is not visible at 1.0 m, so raising this is
+// free. It only needs lowering if the camera can get inside geometry.
+static float s_nearPlane = 1.0f;
+
 __declspec(naked) static void Hook_NiCameraFrustum() {
     __asm {
         mov eax, [edx + 0x14]
@@ -378,8 +391,9 @@ __declspec(naked) static void Hook_NiCameraFrustum() {
         je  loc_ui_cam
 
         // 3D World Camera:
-        mov dword ptr [ecx + 0x114], 0x3E800000  // m_fNear = 0.25f (prevents near-camera wall/character clipping)
-        mov eax, dword ptr [s_customFarClipFloat] // m_fFar = 3000.0f (or FarClipOverride)
+        mov eax, dword ptr [s_nearPlane]
+        mov dword ptr [ecx + 0x114], eax         // m_fNear, configurable (engine ships 0.25f)
+        mov eax, dword ptr [s_customFarClipFloat] // m_fFar
 
     loc_ui_cam:
         mov dword ptr [ecx + 0x118], eax
@@ -586,6 +600,9 @@ bool DrawDistanceFix::Install() {
     } else {
         s_customFarClipFloat = static_cast<float>(s_customFarClip);
     }
+    s_nearPlane = std::clamp(config.nearPlane, 0.05f, 10.0f);
+    {
+    }
     const uint8_t vanillaFrustum[21] = {
         0xD9, 0x42, 0x14,
         0xD9, 0x99, 0x18, 0x01, 0x00, 0x00,
@@ -595,7 +612,16 @@ bool DrawDistanceFix::Install() {
     };
     if (Patch::Verify("NiCamera::SetViewFrustum", kNiCameraFrustumSite, vanillaFrustum, sizeof(vanillaFrustum))) {
         InstallJmpHook(kNiCameraFrustumSite, Hook_NiCameraFrustum, 21);
-        Logger::Get().Info("DrawDistanceFix", "NiCamera 3D view frustum hook installed (Far: {:.1f}m, Near: 0.25m).", s_customFarClipFloat);
+        const float ratio = s_customFarClipFloat / (s_nearPlane > 0.0f ? s_nearPlane : 0.25f);
+        Logger::Get().Info("DrawDistanceFix",
+            "NiCamera 3D view frustum hook installed (Far: {:.1f}m, Near: {:.2f}m, ratio {:.0f}:1).",
+            s_customFarClipFloat, s_nearPlane, ratio);
+        if (ratio > 2500.0f) {
+            Logger::Get().Warn("DrawDistanceFix",
+                "Far/near ratio {:.0f}:1 exceeds the 2500:1 the timecycle's NearFarRatio column "
+                "assumes. Expect Z-fighting on distant coplanar surfaces; raise NearPlane or "
+                "lower FarClipOverride.", ratio);
+        }
     }
 
     Logger::Get().Info("DrawDistanceFix", "Draw distance enhancements successfully active.");

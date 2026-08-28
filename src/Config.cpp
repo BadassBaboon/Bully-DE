@@ -97,11 +97,20 @@ void Config::Load(const std::filesystem::path& iniPath) {
         static_cast<int>(GetPrivateProfileIntW(L"DrawDistance", L"VehiclePoolSize", 2048, pathW.c_str())), 250, 8192));
 
     WCHAR pedPopBuf[32]{ 0 };
-    if (GetPrivateProfileStringW(L"DrawDistance", L"PedPopScale", L"1.0", pedPopBuf, 32, pathW.c_str()) > 0) {
+    if (GetPrivateProfileStringW(L"DrawDistance", L"PedPopScale", L"2.0", pedPopBuf, 32, pathW.c_str()) > 0) {
         try {
             m_drawDist.pedPopScale = std::clamp(std::stof(pedPopBuf), 1.0f, 6.0f);
         } catch (...) {
-            m_drawDist.pedPopScale = 1.0f;
+            m_drawDist.pedPopScale = 2.0f;
+        }
+    }
+
+    WCHAR nearBuf[32]{ 0 };
+    if (GetPrivateProfileStringW(L"DrawDistance", L"NearPlane", L"1.0", nearBuf, 32, pathW.c_str()) > 0) {
+        try {
+            m_drawDist.nearPlane = std::clamp(std::stof(nearBuf), 0.05f, 10.0f);
+        } catch (...) {
+            m_drawDist.nearPlane = 1.0f;
         }
     }
     m_drawDist.extendCoronaBuffer = GetPrivateProfileIntW(L"DrawDistance", L"ExtendCoronaBuffer", 1, pathW.c_str()) != 0;
@@ -153,6 +162,7 @@ void Config::Save(const std::filesystem::path& iniPath) {
     WritePrivateProfileStringW(L"DrawDistance", L"PedPoolSize", std::to_wstring(m_drawDist.pedPoolSize).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"VehiclePoolSize", std::to_wstring(m_drawDist.vehiclePoolSize).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"PedPopScale", std::to_wstring(m_drawDist.pedPopScale).c_str(), pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"NearPlane", std::to_wstring(m_drawDist.nearPlane).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"ExtendCoronaBuffer", m_drawDist.extendCoronaBuffer ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"EnableSectorOverflowGuard", m_drawDist.enableSectorOverflowGuard ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"ExtendTerrainDrawDistance", m_drawDist.extendTerrainDrawDistance ? L"1" : L"0", pathW.c_str());

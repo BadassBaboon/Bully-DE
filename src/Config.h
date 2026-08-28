@@ -36,7 +36,8 @@ struct DrawDistanceSettings {
     bool extendPedPools{ true };
     uint32_t pedPoolSize{ 2048 };        // vanilla 490; loop bound follows at 2x
     uint32_t vehiclePoolSize{ 2048 };    // vanilla 250
-    float pedPopScale{ 1.0f };           // scales PedPop.dat ranges in memory; 1.0 = off         // Expand ped/vehicle population pools from 490/250 to 2048
+    float pedPopScale{ 2.0f };           // scales PedPop.dat ranges in memory; 1.0 = off
+    float nearPlane{ 1.0f };             // camera near plane; engine ships 0.25
     bool extendCoronaBuffer{ true };     // Expand corona / visible light slots from 56 to 1024
     bool enableSectorOverflowGuard{ true }; // Prevent sector list buffer overflow when draw distance is high
     bool extendTerrainDrawDistance{ true }; // Keep distant horizon cliffs, mountains, and landscape terrain visible
