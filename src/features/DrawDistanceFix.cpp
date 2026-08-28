@@ -108,10 +108,18 @@ static void __cdecl ScalePedPopRanges(float* base) {
         base[7691], base[7694]);
 }
 
+static_assert(kPedPopParseFunc == 0x0049C3D0,
+              "keep the literal in Hook_PedPopParsed in step with kPedPopParseFunc");
+
 __declspec(naked) static void Hook_PedPopParsed() {
     __asm {
         push ecx                    // preserve the this pointer
-        mov  eax, kPedPopParseFunc
+        // Literal rather than the constant: MSVC inline asm treats a constexpr
+        // symbol as a MEMORY operand, so `mov eax, kPedPopParseFunc` assembles to
+        // `mov eax, dword ptr [&kPedPopParseFunc]`. That happens to work, but it
+        // is not what the line appears to say. The static_assert above keeps the
+        // two in step.
+        mov  eax, 0x0049C3D0        // kPedPopParseFunc
         call eax                    // run the original parser (this already in ecx)
         pop  ecx                    // ecx = base again
         push ecx
@@ -447,7 +455,11 @@ bool DrawDistanceFix::Install() {
     //     only raise the ceiling and nothing fills it.
     if (config.pedPopScale > 1.0f) {
         s_pedPopScale = std::clamp(config.pedPopScale, 1.0f, 6.0f);
-        const uint8_t vanillaCall[1] = { 0xE8 };
+        // The full 5-byte call, not just the E8. A one-byte check would accept
+        // any call at this address, including one a different plugin had already
+        // installed, and we would then chain into its hook instead of the parser.
+        //   rel32 = 0x0049C3D0 - (0x0049F1A0 + 5) = -11733 = 0xFFFFD22B
+        const uint8_t vanillaCall[5] = { 0xE8, 0x2B, 0xD2, 0xFF, 0xFF };
         if (Patch::Verify("PedPop parse call", kPedPopParseCall, vanillaCall, sizeof(vanillaCall))) {
             if (Memory::WriteCall(kPedPopParseCall, reinterpret_cast<uintptr_t>(&Hook_PedPopParsed))) {
                 Logger::Get().Info("DrawDistanceFix",
