@@ -106,11 +106,11 @@ void Config::Load(const std::filesystem::path& iniPath) {
     }
 
     WCHAR nearBuf[32]{ 0 };
-    if (GetPrivateProfileStringW(L"DrawDistance", L"NearPlane", L"1.0", nearBuf, 32, pathW.c_str()) > 0) {
+    if (GetPrivateProfileStringW(L"DrawDistance", L"NearPlane", L"0.25", nearBuf, 32, pathW.c_str()) > 0) {
         try {
             m_drawDist.nearPlane = std::clamp(std::stof(nearBuf), 0.05f, 10.0f);
         } catch (...) {
-            m_drawDist.nearPlane = 1.0f;
+            m_drawDist.nearPlane = 0.25f;
         }
     }
     m_drawDist.extendCoronaBuffer = GetPrivateProfileIntW(L"DrawDistance", L"ExtendCoronaBuffer", 1, pathW.c_str()) != 0;

@@ -465,18 +465,21 @@ __declspec(naked) static void Hook_RadarBlipFilter() {
 constexpr uintptr_t kNiCameraFrustumSite = 0x00762DDF;
 static float s_customFarClipFloat = 600.0f; // kept in step with s_customFarClip below
 
-// Near plane. The engine ships 0.25 m, which is far closer than anything is ever
-// drawn and costs depth precision for nothing. What matters is the ratio: the
-// timecycle carries a NearFarRatio column set to 2500 and Gamebryo tracks
-// m_fMaxFarNearRatio, so far/near beyond roughly 2500:1 starts Z-fighting on
-// distant coplanar surfaces -- road markings, fence panels, building faces.
+// Near plane. The engine ships 0.25 m and that is the default here too.
 //
-//   near 0.25 with far 1500  = 6000:1   well past budget
-//   near 1.00 with far 1500  = 1500:1   comfortable
+// Raising it buys depth precision: what matters for Z-fighting is the far/near
+// ratio, the timecycle carries a NearFarRatio column set to 2500, and Gamebryo
+// tracks m_fMaxFarNearRatio. At the shipped 600 m far clip, 0.25 m gives 2400:1,
+// which is inside that budget, so vanilla needs no help.
 //
-// Nothing is visible at 0.25 m that is not visible at 1.0 m, so raising this is
-// free. It only needs lowering if the camera can get inside geometry.
-static float s_nearPlane = 1.0f;
+// Raising it is NOT free, which an earlier version of this comment claimed. The
+// near plane is the distance at which geometry starts being clipped away, and
+// cutscene cameras sit well inside a metre of characters' faces. At 1.0 m the
+// front of the model is clipped and you see through into the hollow interior.
+//
+// So this only wants raising alongside a much larger FarClipOverride, and even
+// then 0.5 is a safer step than 1.0.
+static float s_nearPlane = 0.25f;
 
 __declspec(naked) static void Hook_NiCameraFrustum() {
     __asm {
@@ -726,6 +729,13 @@ bool DrawDistanceFix::Install() {
         Logger::Get().Info("DrawDistanceFix",
             "NiCamera 3D view frustum hook installed (Far: {:.1f}m, Near: {:.2f}m, ratio {:.0f}:1).",
             s_customFarClipFloat, s_nearPlane, ratio);
+        if (s_nearPlane > 0.25f) {
+            Logger::Get().Warn("DrawDistanceFix",
+                "NearPlane is raised above the engine's 0.25. This clips geometry closer "
+                "than {:.2f}m from the camera, and cutscene cameras sit within a metre of "
+                "characters' faces -- check a cutscene for clipping through models. Only "
+                "0.25 is verified safe.", s_nearPlane);
+        }
         if (ratio > 2500.0f) {
             Logger::Get().Warn("DrawDistanceFix",
                 "Far/near ratio {:.0f}:1 exceeds the 2500:1 the timecycle's NearFarRatio column "

@@ -75,7 +75,7 @@ it. The tables below are the summary.
 |---|---|---|
 | `LodMultiplier` | `2.0` | Scales all fourteen LOD object pools, and the far clip when `FarClipOverride` is `0`. 4x works; see the note above on why 2x ships. |
 | `FarClipOverride` | `0.0` | `0` auto-computes `LodMultiplier x 300 m`, so 600 m at the shipped multiplier. |
-| `NearPlane` | `1.0` | The engine ships 0.25 m. What matters is the far/near **ratio**: the timecycle's own `NearFarRatio` column says 2500, and past that distant coplanar surfaces Z-fight. The log warns if your combination exceeds it. |
+| `NearPlane` | `0.25` | The engine's own value. Raising it buys depth precision, since what causes Z-fighting is the far/near **ratio** and the timecycle's `NearFarRatio` column says 2500. At the shipped 600 m far clip you are already at 2400:1, so this only wants raising alongside a much larger `FarClipOverride`. It is not free: the near plane is where geometry starts being clipped, and cutscene cameras sit inside a metre of faces, so 1.0 clips through characters. Try 0.5 first. The log reports the ratio. |
 | `PedPopScale` | `2.0` | Scales pedestrian spawn ranges **and** per-area population counts. Minimum spawn radii are deliberately left alone, otherwise NPCs appear on top of the camera. This is the one setting that changes gameplay rather than rendering: it raises populations in interiors and scripted areas too. |
 | `PedPoolSize` | `2048` | Vanilla 490. The loop bound follows at 2x automatically. |
 | `VehiclePoolSize` | `2048` | Vanilla 250. |

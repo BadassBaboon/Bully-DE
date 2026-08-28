@@ -31,11 +31,14 @@ from them, so a row stays self-consistent.
 This is the one setting in the mod that changes gameplay rather than rendering.
 It raises populations in interiors and scripted areas too, not just the street.
 
-**`NearPlane`.** The engine ships a 0.25 m near plane, far closer than anything
-is drawn, which costs depth precision for nothing. What matters is the ratio to
-the far plane; the timecycle's own `NearFarRatio` column says 2500, and past that
-distant coplanar surfaces Z-fight. Defaults to 1.0 m, and the log warns when your
-far/near combination exceeds 2500:1.
+**`NearPlane`.** Exposes the camera near plane, defaulting to the engine's own
+0.25 m so vanilla behaviour is unchanged. Raising it buys depth precision, since
+Z-fighting on distant coplanar surfaces is driven by the far/near ratio and the
+timecycle's `NearFarRatio` column says 2500. It is only worth raising alongside a
+much larger `FarClipOverride`, and not past 0.5 without checking a cutscene:
+the near plane is where geometry starts being clipped, and cutscene cameras sit
+within a metre of characters' faces. The log reports the ratio and warns above
+2500:1.
 
 **Camera far clip.** `FarClipOverride`, applied to both the sector raymarcher and
 the `NiCamera` view frustum so the two cannot disagree.
