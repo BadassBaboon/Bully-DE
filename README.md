@@ -4,8 +4,8 @@
 
 # Bully: Definitive Edition
 
-An ASI plugin for **Bully: Scholarship Edition** (PC) that raises the shadow map
-resolution from 1024 to whatever you ask for.
+An ASI plugin for **Bully: Scholarship Edition** (PC) that raises draw distance,
+sharpens shadows and bloom, and fixes the anti-aliasing artefacts around foliage.
 
 Bully's shadows are soft and blocky outdoors and sharp indoors, and both come
 from the same 1024x1024 shadow map. Indoors a spot light covers one room, so
@@ -20,6 +20,18 @@ shadows vanish at distance. Details are in [`docs/RESEARCH.md`](docs/RESEARCH.md
 ---
 
 ## What it does
+
+**Draw distance.** Fourteen LOD object pools, the camera far clip, sector
+traversal and the corona light table all scale together, because raising one
+without the others either does nothing or overflows something. Ships at 2x.
+
+**Pedestrian population.** `PedPopScale` scales the spawn and cull ranges the
+game reads from `PedPop.dat`, in memory, after the file is parsed -- so your own
+data file still works and is scaled on top. The pool sizes only raise the
+ceiling; this is what fills it.
+
+**Anti-aliasing.** Hardware alpha-to-coverage is activated for foliage and wire
+fences under MSAA, which removes the white halos around leaves and chain-link.
 
 **Shadow map resolution.** Ships at 8192, up from the game's 1024. 4096 is a
 reasonable choice if you would rather not spend the memory; the difference
@@ -54,11 +66,19 @@ All in `Bully-DE.ini`, which documents each one in place.
 | Setting | Default | Notes |
 |---|---|---|
 | `ShadowMapResolution` | `8192` | VRAM per shadow map is `resolution^2 * 4`: 16 MB at 2048, 64 MB at 4096, 256 MB at 8192. |
-| `ShadowTechnique` | `1` (PCF) | `0` is hard-edged, `2` is VSM. |
+| `ShadowTechnique` | `1` (PCF) | `0` is hard-edged, no filtering. |
 | `ShadowGeneratorCount` | `8` | Do not raise this. Every compiled shader binds exactly four spot-shadow slots, so a fifth light has nowhere to go. |
 | `ShadowBudgetMB` | `0` (auto) | Auto is `resolution^2 * 4 * 10`, which is 2560 MB at 8192. Set a number here if you are short on VRAM. |
 | `DisableBlobShadows` | `0` | Turns off the flat oval decals under characters and cars. They are separate from the mesh shadows the spot lights cast, so this removes ground contact where those lights do not reach. |
 | `DumpUnpackedBinary` | `0` | Writes the decrypted `Bully.exe` image to disk for use in IDA. 29 MB per launch. |
+| `LodMultiplier` | `2.0` | Scales the fourteen LOD object pools. |
+| `FarClipOverride` | `0.0` | `0` auto-computes `LodMultiplier x 300 m`. |
+| `NearPlane` | `1.0` | The engine ships 0.25 m. What matters is the far/near ratio; past about 2500:1 distant surfaces Z-fight. The log warns if you exceed it. |
+| `PedPopScale` | `2.0` | Scales pedestrian spawn and cull ranges in memory. Minimum radii are left alone so NPCs do not appear on top of you. |
+| `PedPoolSize` / `VehiclePoolSize` | `2048` | Pool capacities. Vanilla is 490 / 250. |
+| `BloomRadiusPercent` | `50` | `100`, `50` or `25`. Only powers of two are reachable. |
+| `EnableAAFixes` | `1` | Only does anything with MSAA enabled. |
+| `DisableDistanceFog` / `DisableMotionBlur` | `1` | |
 
 ## Build
 
@@ -93,6 +113,13 @@ card can hold, or drop `ShadowMapResolution` to 4096.
 
 ## Known limitations
 
+Depth of field does not work and is not included. It exists in the engine and
+three separate faults were found and fixed, and it still never rendered. See
+`docs/RESEARCH.md`.
+
+VSM shadows are not offered. The engine registers the technique but no shipped
+shader can sample the format it needs.
+
 Only spot lights cast shadows in this game. The engine supports directional and
 point shadow maps and `NiShadowManager` sets up materials for both, but none of
 the 640 compiled shaders can sample them. Nothing here changes that, and doing so
@@ -105,6 +132,10 @@ the research notes if this turns out to matter.
 
 Tested on the Steam release on Windows. The signature checks mean other builds
 refuse to patch rather than corrupt themselves, but nothing else has been tried.
+
+## Changelog
+
+See [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Credits
 

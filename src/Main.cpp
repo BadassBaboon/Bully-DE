@@ -35,7 +35,7 @@ namespace {
         const auto& general = BullyDE::Config::Get().General();
 
         BullyDE::Logger::Get().Initialize(logPath, general.logLevel, general.logToFile);
-        BullyDE::Logger::Get().Info("Core", "Bully: Definitive Edition (Bully-DE.asi) Initializing...");
+        BullyDE::Logger::Get().Info("Core", "Bully: Definitive Edition v" BULLYDE_VERSION " initialising...");
         BullyDE::Logger::Get().Info("Core", "Plugin Directory: {}", moduleDir.string());
         BullyDE::Logger::Get().Info("Core", "Config Path: {}", iniPath.string());
 

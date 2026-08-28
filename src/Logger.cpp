@@ -32,7 +32,7 @@ void Logger::Initialize(const std::filesystem::path& logPath, LogLevel minLevel,
             auto now = std::chrono::system_clock::now();
             auto timeStr = std::format("{:%Y-%m-%d %H:%M:%S}", now);
             m_logFile << "====================================================\n";
-            m_logFile << " Bully: Definitive Edition (Bully-DE.asi) Log\n";
+            m_logFile << " Bully: Definitive Edition (Bully-DE.asi) v" BULLYDE_VERSION " Log\n";
             m_logFile << " Started: " << timeStr << "\n";
             m_logFile << "====================================================\n" << std::flush;
         }

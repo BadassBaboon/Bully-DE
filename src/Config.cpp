@@ -41,7 +41,7 @@ void Config::Load(const std::filesystem::path& iniPath) {
     }
 
     int technique = GetPrivateProfileIntW(L"Shadows", L"ShadowTechnique", 1, pathW.c_str());
-    m_shadows.shadowTechnique = static_cast<uint32_t>(std::clamp(technique, 0, 2));
+    m_shadows.shadowTechnique = static_cast<uint32_t>(std::clamp(technique, 0, 1));
     int gens = GetPrivateProfileIntW(L"Shadows", L"ShadowGeneratorCount", 8, pathW.c_str());
     m_shadows.shadowGeneratorCount = static_cast<uint32_t>(std::clamp(gens, 1, 32));
 

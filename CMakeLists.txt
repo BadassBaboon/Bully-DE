@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Bully-DE LANGUAGES CXX)
+project(Bully-DE VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -51,6 +51,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
+    BULLYDE_VERSION="${PROJECT_VERSION}"
     WIN32_LEAN_AND_MEAN
     NOMINMAX
     _CRT_SECURE_NO_WARNINGS

@@ -58,7 +58,11 @@ constexpr uintptr_t kShadowBudget_Imm   = 0x00758FEB;
 constexpr uintptr_t kTechniquePush_Imm = 0x0040F9B5;
 constexpr uint32_t  kStr_PCF           = 0x00900460; // "NiPCFShadowTechnique"
 constexpr uint32_t  kStr_Standard      = 0x009516C8; // "NiStandardShadowTechnique"
-constexpr uint32_t  kStr_VSM           = 0x00951654; // "NiVSMShadowTechnique"
+// NiVSMShadowTechnique at 0x00951654 is deliberately unused. The engine
+// registers it, but variance shadow maps need a two-channel format holding
+// depth and depth squared, and every shipped shader samples the shadow map the
+// PCF way. Selecting it makes shadows shift, bend and render incorrectly,
+// because the shader reads a layout that was never written for it.
 
 // --- CShadows::Render (legacy 2D blob decals) -------------------------------
 constexpr uintptr_t kBlobShadowRender = 0x005251C0; // 83 EC 20  sub esp, 20h
@@ -167,9 +171,6 @@ bool ShadowFix::Install() {
     if (config.shadowTechnique == 0) {
         techniqueStr = kStr_Standard;
         techniqueName = "NiStandardShadowTechnique";
-    } else if (config.shadowTechnique == 2) {
-        techniqueStr = kStr_VSM;
-        techniqueName = "NiVSMShadowTechnique";
     }
     if (techniqueStr != kStr_PCF) {
         Patch::Dword("Shadow technique", kTechniquePush_Imm, kStr_PCF, techniqueStr);
