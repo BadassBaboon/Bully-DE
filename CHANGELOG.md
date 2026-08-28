@@ -54,9 +54,11 @@ state once a second. It patches nothing and hooks nothing.
 
 ### Changed
 
-- Ships at 4x draw distance out of the box: `LodMultiplier` 4.0, far clip
-  auto-computing to 1200 m, pools at 2048. `PedPopScale` ships at 2.0, kept
-  separate because population is a different axis from geometry.
+- Ships at 2x out of the box: `LodMultiplier` 2.0, far clip auto-computing to
+  600 m, `PedPopScale` 2.0, pools at 2048. Higher multipliers work and 4x is
+  comfortable on modern hardware, but draw distance is the most expensive setting
+  in the mod and the sector traversal caps insertions at 1999 per frame, past
+  which distant geometry silently stops drawing.
 - Verified patch helpers moved to `Patch.h`/`Patch.cpp` and shared by every
   feature. A signature mismatch now logs both byte sequences.
 - CRT linked statically. The `.asi` previously imported `MSVCP140.dll` and

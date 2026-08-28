@@ -19,8 +19,13 @@ Nothing is applied blindly.
 **Draw distance.** Fourteen LOD object pools, the camera far clip, sector
 traversal, distance culling and the corona light table all move together.
 Raising one without the others either does nothing or overflows something, which
-is why this is a set of coordinated patches rather than a single number. Ships
-at 4x, which puts the far clip at 1200 m against the game's 300.
+is why this is a set of coordinated patches rather than a single number.
+
+Ships at 2x, which puts the far clip at 600 m against the game's 300. Raising
+`LodMultiplier` further works and 4x is comfortable on modern hardware, but 2x is
+the default because draw distance is the most expensive setting here and the
+sector traversal caps insertions at 1999 per frame. Past that, distant geometry
+stops drawing rather than warning you.
 
 **Pedestrian population.** `PedPopScale` scales two separate things in memory
 after `PedPop.dat` is parsed: how far pedestrians spawn, and how many of them
@@ -68,8 +73,8 @@ it. The tables below are the summary.
 
 | Setting | Default | Notes |
 |---|---|---|
-| `LodMultiplier` | `4.0` | Scales all fourteen LOD object pools, and the far clip when `FarClipOverride` is `0`. |
-| `FarClipOverride` | `0.0` | `0` auto-computes `LodMultiplier x 300 m`, so 1200 m at the shipped multiplier. |
+| `LodMultiplier` | `2.0` | Scales all fourteen LOD object pools, and the far clip when `FarClipOverride` is `0`. 4x works; see the note above on why 2x ships. |
+| `FarClipOverride` | `0.0` | `0` auto-computes `LodMultiplier x 300 m`, so 600 m at the shipped multiplier. |
 | `NearPlane` | `1.0` | The engine ships 0.25 m. What matters is the far/near **ratio**: the timecycle's own `NearFarRatio` column says 2500, and past that distant coplanar surfaces Z-fight. The log warns if your combination exceeds it. |
 | `PedPopScale` | `2.0` | Scales pedestrian spawn ranges **and** per-area population counts. Minimum spawn radii are deliberately left alone, otherwise NPCs appear on top of the camera. This is the one setting that changes gameplay rather than rendering: it raises populations in interiors and scripted areas too. |
 | `PedPoolSize` | `2048` | Vanilla 490. The loop bound follows at 2x automatically. |
