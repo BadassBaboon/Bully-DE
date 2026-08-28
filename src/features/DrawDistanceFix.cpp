@@ -84,6 +84,14 @@ constexpr uintptr_t kPedPopParseFunc = 0x0049C3D0;
 
 static float s_pedPopScale = 1.0f;
 
+// Counters so the parser hook can report what the density pass actually did.
+// Hook_PedPopParsed wraps the whole of sub_49C3D0, and the row loop runs inside
+// it, so every row has been through here by the time the summary is logged.
+static uint32_t s_rowsScaled = 0;
+static uint32_t s_popBefore = 0;
+static uint32_t s_popAfter = 0;
+
+
 static void __cdecl ScalePedPopRanges(float* base) {
     if (base == nullptr || s_pedPopScale <= 1.0f) {
         return;
@@ -100,12 +108,90 @@ static void __cdecl ScalePedPopRanges(float* base) {
         base[7696 + i] = base[7690 + i];
     }
 
+    if (s_rowsScaled > 0) {
+        Logger::Get().Info("DrawDistanceFix",
+            "PedPop density scaled {:.2f}x across {} rows: total population {} -> {}",
+            s_pedPopScale, s_rowsScaled, s_popBefore, s_popAfter);
+    } else {
+        Logger::Get().Warn("DrawDistanceFix",
+            "PedPop density hook installed but no rows were scaled. Population counts "
+            "are unchanged; only spawn distance is affected.");
+    }
+
     Logger::Get().Info("DrawDistanceFix",
         "PedPop ranges scaled {:.2f}x: onScreenCull={:.0f} onScreenMax={:.0f} "
         "offScreenCull={:.0f} offScreenMax={:.0f} heightCull={:.0f} "
         "(min radii left at {:.0f}/{:.0f})",
         k, base[7690], base[7692], base[7693], base[7695], base[7708],
         base[7691], base[7694]);
+}
+
+// --- Per-area population counts -------------------------------------------
+//
+// The control line scaled above sets how FAR pedestrians spawn. How MANY spawn
+// is a separate set of per-area, per-time-period rows further down the same
+// file, parsed by sub_4645F0. In sub_49C3D0 the record is addressed as:
+//
+//   49C566: imul ecx, 1D8h            ; areaId * 0x1D8
+//   49C56D: lea  eax, [edi+edi*8]     ; period * 9
+//   49C570: add  ecx, esi             ; + table base
+//   49C572: lea  ecx, [ecx+eax*4+4]   ; + period*36 + 4
+//   49C576: call sub_4645F0
+//
+// so each area holds four 36-byte rows, one per time period. Inside a row:
+//
+//   rec[+0x04] int   total
+//   rec[+0x08] bytes per-category counts, one per column in the file
+//   rec[+0x14] int   write cursor, which ends up holding how many were written
+//
+// The file's own totals are the sum of the categories ("7, 0,0,0,0,0,0,2,0,0,4,
+// 0,1" is 2+4+1), so the categories are scaled and the total recomputed from
+// them rather than scaled independently.
+//
+// sub_4645F0 is __thiscall with one stack argument and ends in `retn 4`, so the
+// hook has to re-push the line pointer and clean the caller's argument itself.
+constexpr uintptr_t kPopRowParseCall = 0x0049C576; // call sub_4645F0, ped rows only
+constexpr uintptr_t kPopRowParseFunc = 0x004645F0;
+
+static void __cdecl ScalePopRow(uint8_t* rec) {
+    if (rec == nullptr || s_pedPopScale <= 1.0f) {
+        return;
+    }
+    const uint32_t written = *reinterpret_cast<const uint32_t*>(rec + 0x14);
+    if (written == 0 || written > 12) {
+        return; // not a row shape we recognise; leave it alone
+    }
+
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < written; ++i) {
+        uint32_t v = static_cast<uint32_t>(rec[8 + i] * s_pedPopScale);
+        if (v > 255) v = 255;
+        rec[8 + i] = static_cast<uint8_t>(v);
+        sum += v;
+    }
+    s_popBefore += static_cast<uint32_t>(*reinterpret_cast<const int32_t*>(rec + 4));
+    *reinterpret_cast<int32_t*>(rec + 4) = static_cast<int32_t>(sum);
+    s_popAfter += sum;
+    ++s_rowsScaled;
+}
+
+static_assert(kPopRowParseFunc == 0x004645F0,
+              "keep the literal in Hook_PopRowParsed in step with kPopRowParseFunc");
+
+__declspec(naked) static void Hook_PopRowParsed() {
+    __asm {
+        // On entry: ecx = row record, [esp] = return address, [esp+4] = line ptr.
+        push ecx                     // save the record; line is now at [esp+8]
+        push dword ptr [esp+8]       // re-push the line argument
+        mov  ecx, [esp+4]            // record back into ecx for the thiscall
+        mov  eax, 0x004645F0         // kPopRowParseFunc
+        call eax                     // callee cleans the pushed argument (retn 4)
+        pop  ecx                     // our saved record
+        push ecx
+        call ScalePopRow
+        add  esp, 4
+        ret  4                       // clean the caller's argument
+    }
 }
 
 static_assert(kPedPopParseFunc == 0x0049C3D0,
@@ -467,6 +553,18 @@ bool DrawDistanceFix::Install() {
                     kPedPopParseCall, s_pedPopScale);
             } else {
                 Logger::Get().Error("DrawDistanceFix", "Failed to hook the PedPop parser.");
+            }
+        }
+
+        // Per-area counts. rel32 = 0x004645F0 - (0x0049C576 + 5) = -228737
+        const uint8_t vanillaRowCall[5] = { 0xE8, 0x75, 0x80, 0xFC, 0xFF };
+        if (Patch::Verify("PedPop row parse call", kPopRowParseCall, vanillaRowCall, sizeof(vanillaRowCall))) {
+            if (Memory::WriteCall(kPopRowParseCall, reinterpret_cast<uintptr_t>(&Hook_PopRowParsed))) {
+                Logger::Get().Info("DrawDistanceFix",
+                    "PedPop density hook installed @ 0x{:08X} ({:.2f}x).",
+                    kPopRowParseCall, s_pedPopScale);
+            } else {
+                Logger::Get().Error("DrawDistanceFix", "Failed to hook the PedPop row parser.");
             }
         }
     }
