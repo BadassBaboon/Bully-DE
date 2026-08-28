@@ -20,12 +20,13 @@ Nothing is applied blindly.
 traversal, distance culling and the corona light table all move together.
 Raising one without the others either does nothing or overflows something, which
 is why this is a set of coordinated patches rather than a single number. Ships
-at 2x.
+at 4x, which puts the far clip at 1200 m against the game's 300.
 
-**Pedestrian population.** `PedPopScale` scales the spawn and cull ranges the
-game reads from `PedPop.dat`, in memory, after the file has been parsed. Your own
-data file is still read normally and scaled on top, so a custom `PedPop.dat`
-keeps working. The pool sizes only raise the ceiling; this is what fills it.
+**Pedestrian population.** `PedPopScale` scales two separate things in memory
+after `PedPop.dat` is parsed: how far pedestrians spawn, and how many of them
+each area gets. Your own data file is still read normally and scaled on top, so a
+custom `PedPop.dat` keeps working. The pool sizes are a third thing again and
+only raise the ceiling.
 
 **Shadow resolution.** From the game's 1024 up to 8192. Three separate things in
 the engine cap it: a per-light size assignment that overwrites the value every
@@ -67,10 +68,10 @@ it. The tables below are the summary.
 
 | Setting | Default | Notes |
 |---|---|---|
-| `LodMultiplier` | `2.0` | Scales all fourteen LOD object pools. |
-| `FarClipOverride` | `0.0` | `0` auto-computes `LodMultiplier x 300 m`. |
+| `LodMultiplier` | `4.0` | Scales all fourteen LOD object pools, and the far clip when `FarClipOverride` is `0`. |
+| `FarClipOverride` | `0.0` | `0` auto-computes `LodMultiplier x 300 m`, so 1200 m at the shipped multiplier. |
 | `NearPlane` | `1.0` | The engine ships 0.25 m. What matters is the far/near **ratio**: the timecycle's own `NearFarRatio` column says 2500, and past that distant coplanar surfaces Z-fight. The log warns if your combination exceeds it. |
-| `PedPopScale` | `2.0` | Scales pedestrian spawn and cull ranges. Minimum radii are deliberately left alone, otherwise NPCs appear on top of the camera. |
+| `PedPopScale` | `2.0` | Scales pedestrian spawn ranges **and** per-area population counts. Minimum spawn radii are deliberately left alone, otherwise NPCs appear on top of the camera. This is the one setting that changes gameplay rather than rendering: it raises populations in interiors and scripted areas too. |
 | `PedPoolSize` | `2048` | Vanilla 490. The loop bound follows at 2x automatically. |
 | `VehiclePoolSize` | `2048` | Vanilla 250. |
 | `ForceHighDetailModels` | `0` | Never drops to low-detail meshes. This bypasses the distance comparison entirely, so `LodMultiplier` stops affecting model switching while it is on. |

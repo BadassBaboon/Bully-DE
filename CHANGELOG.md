@@ -16,11 +16,20 @@ raises the buffers with it; there is no separate size to keep in step.
 relationship is vanilla and breaking it makes the game iterate past its own
 allocation.
 
-**`PedPopScale`.** Scales the pedestrian spawn and cull ranges in memory, after
-`PedPop.dat` is parsed. Your own data file is read normally and scaled on top, so
-a custom `PedPop.dat` keeps working. Minimum spawn radii are deliberately left
-alone: they control how close an NPC may appear to the camera, and scaling them
-makes people pop in on top of the player.
+**`PedPopScale`.** Scales two separate things in memory after `PedPop.dat` is
+parsed: the spawn and cull ranges, and the per-area population counts. Ranges and
+counts live in different parts of the file and are read by different functions,
+so scaling only the ranges makes pedestrians visible further away without there
+being any more of them.
+
+Your own data file is read normally and scaled on top, so a custom `PedPop.dat`
+keeps working. Minimum spawn radii are deliberately left alone: they control how
+close an NPC may appear to the camera, and scaling them makes people pop in on
+top of the player. Counts are scaled per category and the row total recomputed
+from them, so a row stays self-consistent.
+
+This is the one setting in the mod that changes gameplay rather than rendering.
+It raises populations in interiors and scripted areas too, not just the street.
 
 **`NearPlane`.** The engine ships a 0.25 m near plane, far closer than anything
 is drawn, which costs depth precision for nothing. What matters is the ratio to
@@ -45,8 +54,9 @@ state once a second. It patches nothing and hooks nothing.
 
 ### Changed
 
-- Ships at 2x out of the box: `LodMultiplier` 2.0, `PedPopScale` 2.0, far clip
-  auto-computing to 600 m, pools at 2048.
+- Ships at 4x draw distance out of the box: `LodMultiplier` 4.0, far clip
+  auto-computing to 1200 m, pools at 2048. `PedPopScale` ships at 2.0, kept
+  separate because population is a different axis from geometry.
 - Verified patch helpers moved to `Patch.h`/`Patch.cpp` and shared by every
   feature. A signature mismatch now logs both byte sequences.
 - CRT linked statically. The `.asi` previously imported `MSVCP140.dll` and
