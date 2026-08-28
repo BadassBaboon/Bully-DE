@@ -302,34 +302,239 @@ they go and are recorded here; the feature code was removed from the mod because
 it changed nothing a player can see.
 
 
-## Things that were tried and did not work
+## Draw distance, LOD and population
 
-**The jitter texture.** `Graphics\NormalizedRandomDirections.tga` is 512x512, and
-only its R and G channels carry data. Decoded as `c/255*2-1` the pairs are unit
-2D vectors, one random direction per texel, which is the classic PCF kernel
-rotation map. 620 of the 640 shaders name a `ShadowNoise_Map` sampler, so it
-looked like the softness dial.
+All of this was derived from `Bully.exe` directly. Where a patch site came from
+elsewhere, the instruction at that address was disassembled and the replacement
+checked against what it actually does before being trusted -- see
+[Patches that looked right and were not](#patches-that-looked-right-and-were-not).
 
-Variants were generated at 75%, 50%, 25% and 0% vector magnitude, verified by
-round-tripping the original through the same encoder and confirming a
-byte-identical file. Installed and compared against stock at the same location
-and time of day, the 50% and 0% variants produced no visible difference at all.
-Not softer, not sharper, no banding. The texture is not reaching the shadow path
-that runs. Ruled out.
+### LOD object pools
 
-**Two patches from an early attempt that were wrong.** `0x7594B4` and `0x7594C3`
-were believed to be a shadow map pool resolution. They are an `NiTArray` element
-count: `sub_776B50` allocates `4 * n` bytes for a pointer array. Setting them to
-4096 allocated a bigger pointer array and changed nothing about shadows.
+`sub_44D320` builds fourteen pool descriptors. Each is a 28-byte object from
+`sub_5EEAA0(0x1Ch)`; the capacity is stored at `[esi+8]` and then `sub_44A760`
+allocates from it:
 
-**Attaching scene roots to the shadow generator.** An early version called
-`sub_75DB00`, `sub_75E040` and `sub_75E240` on the globals at `0xBCBBBC`,
-`0xBCBBC0` and `0xBCBBC8` to try to make characters cast mesh shadows. Those
-three functions are renderer-side, dispatch through vtable slots 25, 28 and 29,
+```c
+this[2] = capacity;              // the immediate the mod patches
+this[0] = alloc(4 * this[2]);    // pointer array
+this[1] = alloc(this[2]);        // per-slot status bytes
+```
+
+Both allocations derive from the same field, so raising the capacity immediate
+raises the buffers with it. There is no separate allocation size to keep in step.
+
+| Pool | Immediate | Vanilla |
+|---|---|---|
+| 1 Buildings / world | `0x44D34F` | 15000 |
+| 2 Static props | `0x44D38D` | 2000 |
+| 3 Render nodes | `0x44D3CB` | 15 |
+| 4 Dynamic props | `0x44D693` | 57 |
+| 5 Small objects | `0x44D6D1` | 8 |
+| 6 Light references | `0x44D70F` | 300 |
+| 7 LOD meshes | `0x44D74D` | 220 |
+| 8 World geometry | `0x44D78B` | 2250 |
+| 9 Root | `0x44D7C9` | 1 |
+| 10 Render instances | `0x44D841` | 4150 |
+| 11 Effects / decals | `0x44D87F` | 87 |
+| 12 Shadow / light casters | `0x44D8BD` | 275 |
+| 13 Close occluders | `0x44D8FB` | 35 |
+| 14 Animated geometry | `0x44D939` | 30 |
+
+Pool 7 is the exception: it holds LOD mesh slots and is the first to run out as
+draw distance grows, because every distant building needs one whether or not it
+is on screen. Scaling 220 linearly still starves it, so it gets a flat 2048 floor.
+
+### Population pools and PedPop ranges
+
+The pool capacities and the spawn ranges are two different things, and raising
+only the capacities does nothing visible.
+
+| Site | Vanilla | What it is |
+|---|---|---|
+| `0x6D3F0A` | 490 | Ped pool size |
+| `0x6D3F4E` | 980 | Ped loop bound -- exactly 2x the size, must move with it |
+| `0x6D40BF` | 490 | Ped allocation size |
+| `0x6D426C` | 250 | Vehicle pool size |
+
+The ranges live in `Config\Dat\PedPop.dat`, parsed by `sub_49C3D0` into the
+object at `dword_C2C108`. The first data line is scanned as
+`"%f %f %f %f %f %f %f %i %i"` into consecutive float slots, and the file's own
+header names them:
+
+| Index | Field |
+|---|---|
+| `base[7690]` | `m_fOnScreenCullRange` |
+| `base[7691]` | `m_fOnScreenMinRadius` |
+| `base[7692]` | `m_fOnScreenMaxRadius` |
+| `base[7693]` | `m_fOffScreenCullRange` |
+| `base[7694]` | `m_fOffScreenMinRadius` |
+| `base[7695]` | `m_fOffScreenMaxRadius` |
+| `base[7696..7701]` | parser's own copy of 7690..7695 |
+| `base[7702..7707]` | second data line |
+| `base[7708]` | `m_fOffScreenHeightCull` |
+| `base[7709]` | `m_nChancePerFrame` (int) |
+| `base[7710]` | `m_nNumAttempts` (int) |
+
+The mod hooks the `call sub_49C3D0` at `0x49F1A0` and scales the values after
+parsing, rather than shipping an edited data file. The player's own file is read
+normally and scaled on top, so a custom `PedPop.dat` keeps working.
+
+Two details matter. The parser copies 7690..7695 into 7696..7701, so both sets
+have to be updated or the game reverts to the unscaled copy. And the minimum
+radii (7691, 7694) are deliberately left alone -- they set how close a ped may
+spawn to the camera, and scaling them makes NPCs appear on top of the player.
+
+### Camera far clip
+
+`0x453046` and `0x4530BA` hold the *address* of the far-clip constant the game
+loads (`0x00906530`), not the value. The mod repoints both at its own double.
+`NiCamera::SetViewFrustum` is hooked separately at `0x762DDF` for the hardware
+projection matrix.
+
+Depth precision is the constraint here, not distance. The timecycle carries a
+`NearFarRatio` column set to 2500, and Gamebryo tracks `m_fMaxFarNearRatio`. A
+0.25 m near plane against a 2000 m far plane is 8000:1 and will Z-fight on
+distant coplanar surfaces; against 600 m it is 2400:1 and within budget.
+
+### Distance culling
+
+`0x5111D0` and `0x51175E` are early-out jumps. Both were checked before being
+NOPed, because bypassing a validity check and bypassing a distance check look
+identical in a patch list:
+
+```
+5111C3: faddp          ; dx*dx + dy*dy
+5111C7: fmulp st(2)    ; radius*radius
+5111C9: fcompp         ; squared distance vs squared radius
+5111D0: jz             <- bypassed
+```
+
+Both are FPU comparisons of squared distance against a radius, so neither leaves
+a null pointer to dereference. The second sits in corona code -- it writes
+`byte_C660CE[esi]`, one of the relocated table fields.
+
+### Sector traversal
+
+Traversal is expanded to 1296 sectors (36x36) with five bounds guards on the
+insertion sites (`0x4525C1`, `0x4526D2`, `0x452891`, `0x4529E2`, `0x452C22`).
+The vanilla insertion is:
+
+```
+4525C1: mov ecx, dword_C11D60   ; write cursor
+4525C7: mov [ecx], esi          ; store
+4525C9: add dword_C11D60, 4     ; advance cursor
+4525D0: add dword_C13F00, 1     ; bump count
+```
+
+Each guard checks `dword_C13F00 < 1999` and either resumes at `0x4525C9`
+(letting the original advance and increment) or jumps past the store *and* both
+increments. Expanding traversal without these overflows the array.
+
+### Corona / visible light table
+
+The table is an array of 56 structs at `0x00C660A0` with stride `0x30`, proven by
+its own clearing loop:
+
+```
+510E54: lea ecx, [ebx+38h]   ; ebx is 0 here, so ecx = 56
+510E57: mov eax, offset dword_C660AC
+510E60: mov dword ptr [eax], 0
+510E66: add eax, 30h          ; stride
+510E69: sub ecx, 1
+510E6C: jnz short loc_510E60
+```
+
+It is relocated to `0x020F4000` and expanded to 1024 slots by 97 patches: field
+base pointers move from `0x00C660xx` to `0x020F40xx`, bounds move from `0x38`
+(56) to `0x400` (1024), and a count-1 bound at `0x8DD4A3` moves from 55 to 1023.
+`1024 * 0x30 = 0xC000`, which is exactly the gap to the secondary table at
+`0x02100000`; `0x20000` is cleared to cover both.
+
+`0x020F4000` is dead space at the tail of the image left by the packer. It has
+no cross-references anywhere in the binary, and the region reads as zeros from
+`0x020E0000` through `0x02140000`. The image spans `0x400000`-`0x2146000`, so
+the whole relocation is inside mapped memory.
+
+### MSAA and vegetation
+
+`sub_8826E0` initialises hardware alpha-to-coverage. The check at `0x8827A3`
+never activates it for foliage and wire fences under MSAA, which is what causes
+the white halos. The mod replaces the check with its own.
+
+There is no flickering-texture fix, and that is deliberate -- see the patches
+section below.
+
+### Fog and motion blur
+
+Both are switched off by blanking the shader uniform *name* the engine looks the
+constant up by. With the name gone the by-name lookup fails, the parameter is
+never uploaded, and the shader constant keeps its default.
+
+The strings sit back to back with unrelated uniforms, so the length must be
+exact:
+
+```
+0x90064C: "cFog" + 4 pad (8) + "vFogNearFar" + NUL (12) = 20   then "BoneIdx"
+0x91B940: "gMotionBlurStrength" + NUL              = 20   then "gMotionBlurTexture"
+```
+
+Twenty bytes at each. Twenty-four overruns into `BoneIdx`, the skinning bone
+index, and into `gMotionBlurTexture`.
+
+## Patches that looked right and were not
+
+Every one of these applied cleanly, matched its expected vanilla bytes, and did
+something other than what its comment claimed. They are recorded because the
+failure mode is consistent: the bytes were reproduced without reproducing the
+reasoning, and a patch list alone cannot show the difference.
+
+**`0x5E6837`, described as redirecting a branch.** The byte is not an opcode. It
+is the displacement of `jz short loc_5E6841` at `0x5E6836`:
+
+```
+5E6834: 3B C3     cmp eax, ebx
+5E6836: 74 09     jz short loc_5E6841
+```
+
+Writing `0xEB` retargets the jump from +9 to +235, landing at `0x5E6923` --
+inside `sub_5E6920` and in the middle of `mov edi, ecx`, so execution resumes on
+the `0xF9` byte as `stc`, runs that function without its prologue, and hits a
+pop-based epilogue against the wrong stack frame. A crash or silent stack
+corruption every time `eax == ebx`. No displacement from that jump can express a
+correct fix; every reachable target is inside `sub_5E6510` or past its end.
+
+**`0x40F744`, described as adding 20 m to a light's shadow radius.** Those nine
+bytes are three field initialisations in a constructor, with `edx` already
+zeroed:
+
+```
+40F744: 89 50 08   mov [eax+8],   edx
+40F747: 89 50 0C   mov [eax+0Ch], edx
+40F74A: 89 50 10   mov [eax+10h], edx
+```
+
+Replacing them with a write to `[eax+4]` leaves `+8`, `+0Ch` and `+10h` holding
+whatever was in the freshly allocated struct. The cited mechanism was wrong too:
+`sub_410320` is the debug string formatter, not a radius accumulator.
+
+**The uniform-name blanking, described as unhooking.** The mechanism was sound;
+only the length was wrong, by exactly four bytes at both sites. This one is
+recorded separately from the two above because it was initially removed outright
+on the assumption that the whole approach was broken. It was not. The lesson cuts
+both ways: finding a real bug next to a plausible-sounding second claim is not
+licence to delete the feature without testing that second claim too.
+
+**`0x7594B4` and `0x7594C3`, believed to be a shadow map pool resolution.** They
+are an `NiTArray` element count -- `sub_776B50` allocates `4 * n` bytes for a
+pointer array. Setting them to 4096 allocated a bigger pointer array and changed
+nothing about shadows.
+
+**Attaching scene roots to the shadow generator.** `sub_75DB00`, `sub_75E040`
+and `sub_75E240` are renderer-side, dispatch through vtable slots 25, 28 and 29,
 and dereference `this+0x18`. Calling them on scene graph nodes is undefined
-behaviour and produced the crash dumps that started this investigation.
-Characters already cast mesh shadows from the spot lights, so the feature was
-not needed.
+behaviour. Characters already cast mesh shadows from the spot lights, so the
+feature was not needed.
 
 ## Getting a readable binary
 
