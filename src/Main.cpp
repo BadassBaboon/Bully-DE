@@ -5,6 +5,9 @@
 #include "UnpackHook.h"
 #include "features/ShadowFix.h"
 #include "features/BloomFix.h"
+#include "features/DrawDistanceFix.h"
+#include "features/AAFix.h"
+#include "features/GraphicsFix.h"
 #include "features/Diagnostics.h"
 
 namespace {
@@ -36,10 +39,13 @@ namespace {
         BullyDE::Logger::Get().Info("Core", "Plugin Directory: {}", moduleDir.string());
         BullyDE::Logger::Get().Info("Core", "Config Path: {}", iniPath.string());
 
-        // Register post-unpack hook to install shadow resolution patches directly in Gamebryo engine memory
+        // Register post-unpack hook to install shadow, bloom, draw distance, AA, and graphics patches directly in Gamebryo engine memory
         BullyDE::UnpackHook::Register([]() {
             BullyDE::ShadowFix::Install();
             BullyDE::BloomFix::Install();
+            BullyDE::DrawDistanceFix::Install();
+            BullyDE::AAFix::Install();
+            BullyDE::GraphicsFix::Install();
             BullyDE::Diagnostics::Install();
         });
     }

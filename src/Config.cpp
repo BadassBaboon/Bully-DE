@@ -50,7 +50,7 @@ void Config::Load(const std::filesystem::path& iniPath) {
 
     m_shadows.disableBlobShadows = GetPrivateProfileIntW(L"Shadows", L"DisableBlobShadows", 0, pathW.c_str()) != 0;
     m_shadows.dumpUnpackedBinary = GetPrivateProfileIntW(L"Shadows", L"DumpUnpackedBinary", 0, pathW.c_str()) != 0;
-
+    m_shadows.forceDistanceShadows = GetPrivateProfileIntW(L"Shadows", L"ForceDistanceShadows", 1, pathW.c_str()) != 0;
 
     // [Bloom]
     m_bloom.enabled = GetPrivateProfileIntW(L"Bloom", L"EnableBloomChanges", 1, pathW.c_str()) != 0;
@@ -72,6 +72,51 @@ void Config::Load(const std::filesystem::path& iniPath) {
     m_bloom.strength  = readOverride(L"BloomStrength", 255);
     m_bloom.scale     = readOverride(L"BloomScale", 64);
 
+    // [DrawDistance]
+    m_drawDist.enabled = GetPrivateProfileIntW(L"DrawDistance", L"EnableDrawDistanceChanges", 1, pathW.c_str()) != 0;
+    WCHAR lodBuf[32]{ 0 };
+    if (GetPrivateProfileStringW(L"DrawDistance", L"LodMultiplier", L"2.0", lodBuf, 32, pathW.c_str()) > 0) {
+        m_drawDist.lodMultiplier = std::stof(lodBuf);
+    }
+    WCHAR farClipBuf[32]{ 0 };
+    if (GetPrivateProfileStringW(L"DrawDistance", L"FarClipOverride", L"0.0", farClipBuf, 32, pathW.c_str()) > 0) {
+        // std::stof throws on garbage, and Load() runs from DllMain -- an escaped
+        // exception there kills the process before the game starts.
+        try {
+            m_drawDist.farClipOverride = std::stof(farClipBuf);
+        } catch (...) {
+            m_drawDist.farClipOverride = 0.0f;
+        }
+    }
+    m_drawDist.bypassDistanceCulling = GetPrivateProfileIntW(L"DrawDistance", L"BypassDistanceCulling", 1, pathW.c_str()) != 0;
+    m_drawDist.forceHighDetailModels = GetPrivateProfileIntW(L"DrawDistance", L"ForceHighDetailModels", 0, pathW.c_str()) != 0;
+    m_drawDist.extendPedPools = GetPrivateProfileIntW(L"DrawDistance", L"ExtendPedPools", 1, pathW.c_str()) != 0;
+    m_drawDist.pedPoolSize = static_cast<uint32_t>(std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"DrawDistance", L"PedPoolSize", 2048, pathW.c_str())), 490, 8192));
+    m_drawDist.vehiclePoolSize = static_cast<uint32_t>(std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"DrawDistance", L"VehiclePoolSize", 2048, pathW.c_str())), 250, 8192));
+
+    WCHAR pedPopBuf[32]{ 0 };
+    if (GetPrivateProfileStringW(L"DrawDistance", L"PedPopScale", L"1.0", pedPopBuf, 32, pathW.c_str()) > 0) {
+        try {
+            m_drawDist.pedPopScale = std::clamp(std::stof(pedPopBuf), 1.0f, 6.0f);
+        } catch (...) {
+            m_drawDist.pedPopScale = 1.0f;
+        }
+    }
+    m_drawDist.extendCoronaBuffer = GetPrivateProfileIntW(L"DrawDistance", L"ExtendCoronaBuffer", 1, pathW.c_str()) != 0;
+    m_drawDist.enableSectorOverflowGuard = GetPrivateProfileIntW(L"DrawDistance", L"EnableSectorOverflowGuard", 1, pathW.c_str()) != 0;
+    m_drawDist.extendTerrainDrawDistance = GetPrivateProfileIntW(L"DrawDistance", L"ExtendTerrainDrawDistance", 1, pathW.c_str()) != 0;
+    m_drawDist.filterRadarPedBlips = GetPrivateProfileIntW(L"DrawDistance", L"FilterRadarPedBlips", 0, pathW.c_str()) != 0;
+
+    // [AntiAliasing]
+    m_aa.enabled = GetPrivateProfileIntW(L"AntiAliasing", L"EnableAAFixes", 1, pathW.c_str()) != 0;
+    m_aa.fixVegetationOutlines = GetPrivateProfileIntW(L"AntiAliasing", L"FixVegetationOutlines", 1, pathW.c_str()) != 0;
+
+    // [Graphics]
+    m_graphics.disableDistanceFog = GetPrivateProfileIntW(L"Graphics", L"DisableDistanceFog", 0, pathW.c_str()) != 0;
+    m_graphics.disableMotionBlur = GetPrivateProfileIntW(L"Graphics", L"DisableMotionBlur", 0, pathW.c_str()) != 0;
+
     // [Diagnostics]
     m_diag.logPostFXState = GetPrivateProfileIntW(L"Diagnostics", L"LogPostFXState", 0, pathW.c_str()) != 0;
 }
@@ -90,6 +135,7 @@ void Config::Save(const std::filesystem::path& iniPath) {
     WritePrivateProfileStringW(L"Shadows", L"ShadowBudgetMB", std::to_wstring(m_shadows.shadowBudgetMB).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"Shadows", L"DisableBlobShadows", m_shadows.disableBlobShadows ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"Shadows", L"DumpUnpackedBinary", m_shadows.dumpUnpackedBinary ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"Shadows", L"ForceDistanceShadows", m_shadows.forceDistanceShadows ? L"1" : L"0", pathW.c_str());
 
     WritePrivateProfileStringW(L"Bloom", L"EnableBloomChanges", m_bloom.enabled ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"Bloom", L"BloomRadiusPercent", std::to_wstring(m_bloom.radiusPercent).c_str(), pathW.c_str());
@@ -97,6 +143,27 @@ void Config::Save(const std::filesystem::path& iniPath) {
     WritePrivateProfileStringW(L"Bloom", L"BloomThreshold", std::to_wstring(m_bloom.threshold).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"Bloom", L"BloomStrength", std::to_wstring(m_bloom.strength).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"Bloom", L"BloomScale", std::to_wstring(m_bloom.scale).c_str(), pathW.c_str());
+
+    WritePrivateProfileStringW(L"DrawDistance", L"EnableDrawDistanceChanges", m_drawDist.enabled ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"LodMultiplier", std::to_wstring(m_drawDist.lodMultiplier).c_str(), pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"FarClipOverride", std::to_wstring(m_drawDist.farClipOverride).c_str(), pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"BypassDistanceCulling", m_drawDist.bypassDistanceCulling ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"ForceHighDetailModels", m_drawDist.forceHighDetailModels ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"ExtendPedPools", m_drawDist.extendPedPools ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"PedPoolSize", std::to_wstring(m_drawDist.pedPoolSize).c_str(), pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"VehiclePoolSize", std::to_wstring(m_drawDist.vehiclePoolSize).c_str(), pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"PedPopScale", std::to_wstring(m_drawDist.pedPopScale).c_str(), pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"ExtendCoronaBuffer", m_drawDist.extendCoronaBuffer ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"EnableSectorOverflowGuard", m_drawDist.enableSectorOverflowGuard ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"ExtendTerrainDrawDistance", m_drawDist.extendTerrainDrawDistance ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"FilterRadarPedBlips", m_drawDist.filterRadarPedBlips ? L"1" : L"0", pathW.c_str());
+
+    WritePrivateProfileStringW(L"AntiAliasing", L"EnableAAFixes", m_aa.enabled ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"AntiAliasing", L"FixVegetationOutlines", m_aa.fixVegetationOutlines ? L"1" : L"0", pathW.c_str());
+
+    WritePrivateProfileStringW(L"Graphics", L"DisableDistanceFog", m_graphics.disableDistanceFog ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"Graphics", L"DisableMotionBlur", m_graphics.disableMotionBlur ? L"1" : L"0", pathW.c_str());
+
     WritePrivateProfileStringW(L"Diagnostics", L"LogPostFXState", m_diag.logPostFXState ? L"1" : L"0", pathW.c_str());
 }
 

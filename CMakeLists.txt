@@ -30,6 +30,14 @@ add_library(${PROJECT_NAME} SHARED
     src/features/ShadowFix.h
     src/features/BloomFix.cpp
     src/features/BloomFix.h
+    src/features/DrawDistanceFix.cpp
+    src/features/DrawDistanceFix.h
+    src/features/AAFix.cpp
+    src/features/AAFix.h
+    src/features/CoronaPatches.cpp
+    src/features/CoronaPatches.h
+    src/features/GraphicsFix.cpp
+    src/features/GraphicsFix.h
     src/features/Diagnostics.cpp
     src/features/Diagnostics.h
 )

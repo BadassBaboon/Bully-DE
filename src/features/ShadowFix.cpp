@@ -63,6 +63,30 @@ constexpr uint32_t  kStr_VSM           = 0x00951654; // "NiVSMShadowTechnique"
 // --- CShadows::Render (legacy 2D blob decals) -------------------------------
 constexpr uintptr_t kBlobShadowRender = 0x005251C0; // 83 EC 20  sub esp, 20h
 
+// REMOVED: "+20m light shadow caster radius" at 0x0040F744.
+//
+// Those nine bytes are three field initialisations in a constructor, with edx
+// already zeroed by `xor edx, edx` two instructions earlier:
+//
+//   40F744: 89 50 08   mov [eax+8],   edx
+//   40F747: 89 50 0C   mov [eax+0Ch], edx
+//   40F74A: 89 50 10   mov [eax+10h], edx
+//
+// The old patch replaced all nine with a write to [eax+4] -- a DIFFERENT field
+// -- plus two NOPs, leaving +8, +0Ch and +10h holding whatever garbage was in
+// the freshly allocated struct.
+//
+// The stated mechanism was wrong too: sub_410320 is the debug string formatter
+// ("%s ON at distance %.2f/%.2f - %.2f"), not a radius accumulator, so there is
+// no evidence a value at [eax+4] extends any light's reach.
+
+// --- Force Distance Shadow Generation (NiShadowGenerator bit 0x20) ----------
+// sub_40FB30:
+//   0x0040FCDA: 74 07  jz short loc_40FCE3
+// NOPing this jump forces "or word ptr [eax+8], 20h" for every active light,
+// commanding NiShadowGenerator to maintain perspective shadow projection at distance.
+constexpr uintptr_t kForceDistanceShadows = 0x0040FCDA;
+
 } // namespace
 
 bool ShadowFix::Install() {
@@ -161,6 +185,19 @@ bool ShadowFix::Install() {
             if (Memory::Write<uint8_t>(kBlobShadowRender, 0xC3)) {
                 Logger::Get().Info("ShadowFix", "Disabled 2D blob shadow decals (CShadows::Render -> ret)");
             }
+        }
+    }
+
+    // 7. Force the exact-size shadow map flag (generator bit 0x20).
+    //    NOPs the jz at 0x40FCDA so the `or word [eax+8], 20h` path always runs.
+    //    Bit 0x20 is the "require an exactly sized shadow map" flag -- it is the
+    //    last argument to sub_757C10 -- not a distance/projection control.
+    //    Forcing it disables the nearest-size reuse fallback, so under budget
+    //    pressure a light fails to get a map rather than getting a near-fit one.
+    if (config.forceDistanceShadows) {
+        const uint8_t vanilla[2] = { 0x74, 0x07 };
+        if (Patch::Nop("Force distance shadows flag", kForceDistanceShadows, vanilla, sizeof(vanilla))) {
+            Logger::Get().Info("ShadowFix", "Forced perspective distance shadow generation for all lights.");
         }
     }
 
