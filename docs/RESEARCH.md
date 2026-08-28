@@ -377,14 +377,91 @@ header names them:
 | `base[7709]` | `m_nChancePerFrame` (int) |
 | `base[7710]` | `m_nNumAttempts` (int) |
 
-The mod hooks the `call sub_49C3D0` at `0x49F1A0` and scales the values after
-parsing, rather than shipping an edited data file. The player's own file is read
+The mod hooks the `call sub_49C3D0` at `0x49F1A0` and scales these values after
+parsing, rather than shipping an edited data file. That covers spawn *distance*
+only; the counts are handled separately, below. The player's own file is read
 normally and scaled on top, so a custom `PedPop.dat` keeps working.
 
 Two details matter. The parser copies 7690..7695 into 7696..7701, so both sets
 have to be updated or the game reverts to the unscaled copy. And the minimum
 radii (7691, 7694) are deliberately left alone -- they set how close a ped may
 spawn to the camera, and scaling them makes NPCs appear on top of the player.
+
+### Per-area population counts
+
+Spawn ranges and spawn counts are separate, and scaling only the ranges makes
+pedestrians visible further away without there being any more of them. The pool
+capacities above are a third separate thing again: they are only a ceiling.
+
+The counts are the per-area, per-time-period rows further down the same file,
+parsed by `sub_4645F0`. In `sub_49C3D0` the record is addressed as:
+
+```
+49C566: imul ecx, 1D8h            ; areaId * 0x1D8
+49C56D: lea  eax, [edi+edi*8]     ; period * 9
+49C570: add  ecx, esi             ; + table base
+49C572: lea  ecx, [ecx+eax*4+4]   ; + period*36 + 4
+49C576: call sub_4645F0
+```
+
+So every area holds four 36-byte rows, one per time period, and `edi` runs 0..3.
+Inside a row:
+
+| Offset | Type | Meaning |
+|---|---|---|
+| `+0x04` | int | total |
+| `+0x08` | bytes | per-category counts, one per column in the file |
+| `+0x14` | int | write cursor; ends up holding how many were written |
+
+The cursor at `+0x14` is what tells the scaler how many categories the row
+actually has, rather than assuming a fixed width. Rows that report a count of
+zero or more than twelve are left untouched.
+
+The file's totals are the sum of its categories: a row reading
+`7, 0,0,0,0,0,0,2,0,0,4,0,1` is `2+4+1`. So the categories are scaled and the
+total recomputed from them, which keeps the row self-consistent instead of
+letting two numbers drift apart. Category bytes saturate at 255.
+
+`sub_4645F0` is `__thiscall` with one stack argument and ends in `retn 4`, so the
+hook has to re-push the line pointer and clean the caller's argument itself:
+
+```
+51                push ecx                ; save record; line is now at [esp+8]
+FF 74 24 08       push dword ptr [esp+8]  ; re-push the line argument
+8B 4C 24 04       mov  ecx, [esp+4]       ; record back into ecx
+B8 F0 45 46 00    mov  eax, 0x004645F0
+FF D0             call eax                ; callee cleans the pushed argument
+59 51             pop ecx / push ecx
+E8 ...            call ScalePopRow
+83 C4 04          add  esp, 4
+C2 04 00          ret  4                  ; clean the caller's argument
+```
+
+`sub_4645F0` is shared with the vehicle population file, but only the
+pedestrian call site is hooked. The vehicle counts ship as zero in every row, so
+scaling them would do nothing either way.
+
+Note this is the one change in the mod that alters gameplay rather than
+rendering: it raises populations in interiors and scripted areas too, not just
+the street.
+
+### Inline assembly and constants
+
+MSVC inline assembly treats a `constexpr` symbol as a **memory operand**, not an
+immediate. Writing
+
+```
+mov eax, kPedPopParseFunc
+```
+
+assembles to `mov eax, dword ptr [&kPedPopParseFunc]` (`A1`, not `B8`). That
+happens to work, because the constant is materialised in `.data` and the load
+fetches its value, but it is not what the line appears to say and it costs a
+memory read on every call.
+
+Both population hooks therefore use literals with a `static_assert` tying them to
+the named constant, and the emitted bytes are checked against the built binary
+rather than assumed.
 
 ### Camera far clip
 
