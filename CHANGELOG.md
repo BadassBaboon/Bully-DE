@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.1
+
+### Fixed
+
+**Camera clipping through characters in cutscenes.** `NearPlane` shipped at 1.0 m
+in 1.1.0, which clips geometry closer than a metre to the camera. Cutscene
+cameras sit well inside that, so the front of a character's head was clipped away
+and you could see through into the hollow interior.
+
+It now defaults to the engine's own 0.25 m, so vanilla behaviour is unchanged.
+The precision the higher value bought was not needed at the shipped 600 m far
+clip, where 0.25 m already gives 2400:1 against the 2500:1 the timecycle's
+`NearFarRatio` column assumes.
+
+The setting remains for anyone pushing `FarClipOverride` out far enough to
+matter, and the log now warns whenever it is raised above 0.25.
+
 ## 1.1.0
 
 Draw distance, LOD, population, anti-aliasing and post-processing, on top of the
