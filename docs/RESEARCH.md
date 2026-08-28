@@ -466,6 +466,25 @@ the white halos. The mod replaces the check with its own.
 There is no flickering-texture fix, and that is deliberate -- see the patches
 section below.
 
+### What "fog" actually is
+
+Two separate things get called fog in this game and only one of them is fog.
+
+The effect players describe as fog rolling in is **object alpha fade**. Object
+definitions carry a `FadeDistance` property, read alongside `MaxRadius` in
+`sub_666F70` at `0x6670A5`, so geometry ramps in from transparent as it streams
+rather than appearing at full opacity. Pushing draw distance out reduces the
+effect not by changing any fog parameter but by making the geometry exist and
+stay opaque further away.
+
+The shader fog is the separate subtle haze that gives distant mountains and
+cliffs depth. That is what the uniforms below control. Vanilla sits between the
+two extremes: geometry fading in *and* a haze over it.
+
+This matters for the settings. `DisableDistanceFog` removes the haze. It does not
+stop buildings materialising in front of the camera; the draw distance settings
+do that. Turning both off gives distant terrain no depth cue at all.
+
 ### Fog and motion blur
 
 Both are switched off by blanking the shader uniform *name* the engine looks the
