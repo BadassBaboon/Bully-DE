@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.2
+
+### Fixed
+
+**Lampposts and other 2DFX coronas disappearing with `ExtendCoronaBuffer`.**
+Relocating the corona table only works if every instruction referencing it is
+repointed. One was missed: `fld dword ptr [esi+0C660BCh]` at `0x00511774` kept
+reading the old table, which nothing writes once the table has moved, so it read
+zero and the comparison below it rejected the corona.
+
+The same field is correctly relocated at three other sites, including one 42
+bytes earlier in the same function, so this was an omission rather than a
+misunderstanding. Nothing crashed and no signature check failed, because the
+instruction was left exactly as the game shipped it.
+
+`tools/verify_corona_coverage.py` now checks the patch list against every
+reference in the game image, so a missed one is a build-time failure instead of
+a bug report. It also records the one reference that must *not* be relocated:
+`0x00510E90` uses the table's start address as the end sentinel of a different
+array.
+
 ## 1.1.1
 
 ### Fixed
