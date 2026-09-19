@@ -76,7 +76,11 @@ void Config::Load(const std::filesystem::path& iniPath) {
     m_drawDist.enabled = GetPrivateProfileIntW(L"DrawDistance", L"EnableDrawDistanceChanges", 1, pathW.c_str()) != 0;
     WCHAR lodBuf[32]{ 0 };
     if (GetPrivateProfileStringW(L"DrawDistance", L"LodMultiplier", L"2.0", lodBuf, 32, pathW.c_str()) > 0) {
-        m_drawDist.lodMultiplier = std::stof(lodBuf);
+        try {
+            m_drawDist.lodMultiplier = std::stof(lodBuf);
+        } catch (...) {
+            m_drawDist.lodMultiplier = 2.0f;
+        }
     }
     WCHAR farClipBuf[32]{ 0 };
     if (GetPrivateProfileStringW(L"DrawDistance", L"FarClipOverride", L"0.0", farClipBuf, 32, pathW.c_str()) > 0) {
