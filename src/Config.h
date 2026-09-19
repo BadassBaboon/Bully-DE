@@ -31,7 +31,7 @@ struct DrawDistanceSettings {
     bool enabled{ true };
     float lodMultiplier{ 2.0f };         // Multiplier for LOD distance (0.0 = all low LOD, 1.0 = vanilla, 2.0 = 2x, etc.)
     float farClipOverride{ 0.0f };       // Camera far clip plane in meters (0.0 = auto: 300.0 * lodMultiplier)
-    bool bypassDistanceCulling{ true };  // Bypass early-out distance culling checks (sub_511130 & sub_5115A0)
+    bool bypassDistanceCulling{ false }; // Off by default: it makes 2DFX coronas flicker. See DrawDistanceFix.cpp.
     bool forceHighDetailModels{ false }; // NOP LOD model distance switch (forces high-detail models everywhere)
     bool extendPedPools{ true };
     uint32_t pedPoolSize{ 2048 };        // vanilla 490; loop bound follows at 2x

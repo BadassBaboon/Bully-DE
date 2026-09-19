@@ -88,7 +88,7 @@ void Config::Load(const std::filesystem::path& iniPath) {
             m_drawDist.farClipOverride = 0.0f;
         }
     }
-    m_drawDist.bypassDistanceCulling = GetPrivateProfileIntW(L"DrawDistance", L"BypassDistanceCulling", 1, pathW.c_str()) != 0;
+    m_drawDist.bypassDistanceCulling = GetPrivateProfileIntW(L"DrawDistance", L"BypassDistanceCulling", 0, pathW.c_str()) != 0;
     m_drawDist.forceHighDetailModels = GetPrivateProfileIntW(L"DrawDistance", L"ForceHighDetailModels", 0, pathW.c_str()) != 0;
     m_drawDist.extendPedPools = GetPrivateProfileIntW(L"DrawDistance", L"ExtendPedPools", 1, pathW.c_str()) != 0;
     m_drawDist.pedPoolSize = static_cast<uint32_t>(std::clamp(

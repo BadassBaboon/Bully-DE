@@ -80,7 +80,8 @@ it. The tables below are the summary.
 | `PedPoolSize` | `2048` | Vanilla 490. The loop bound follows at 2x automatically. |
 | `VehiclePoolSize` | `2048` | Vanilla 250. |
 | `ForceHighDetailModels` | `0` | Never drops to low-detail meshes. This bypasses the distance comparison entirely, so `LodMultiplier` stops affecting model switching while it is on. |
-| `BypassDistanceCulling`, `ExtendCoronaBuffer`, `EnableSectorOverflowGuard`, `ExtendTerrainDrawDistance` | `1` | Parts of the same coordinated set. |
+| `ExtendCoronaBuffer`, `EnableSectorOverflowGuard`, `ExtendTerrainDrawDistance` | `1` | Parts of the same coordinated set. |
+| `BypassDistanceCulling` | `0` | Ships off. It removes the distance test guarding the corona slot table, and that table silently drops coronas when it is full, so 2DFX flicker on and off. A bigger `ExtendCoronaBuffer` does not help. |
 | `FilterRadarPedBlips` | `0` | Stops distant ambient NPCs cluttering the minimap. |
 
 ### Shadows

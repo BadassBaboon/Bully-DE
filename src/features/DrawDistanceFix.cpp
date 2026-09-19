@@ -590,8 +590,31 @@ bool DrawDistanceFix::Install() {
         "  (0x00906530 was the game's own far-clip constant; both sites now point at "
         "our {:.1f}m value instead.)", s_customFarClip);
 
-    // 4. Object Distance Culling Bypass
+    // 4. Object Distance Culling Bypass -- OFF by default, and it should stay off.
+    //
+    // The jump at kCullingEarlyOut1 is the `dx*dx + dy*dy > radius*radius` test
+    // that guards the corona slot allocator in sub_511130. That allocator is a
+    // fixed-size linear first-fit table, and when it finds no free slot it gives
+    // up silently:
+    //
+    //     5112E0: scan for a slot whose owner id == 0
+    //     5112FF: cmp ax, <capacity> / jz 511473   <- no slot, corona not drawn
+    //
+    // With the cull removed, every corona in the world competes for slots every
+    // frame, and which ones lose depends on call order, which shifts as sectors
+    // stream. Different losers each frame is visible as 2DFX flickering on and
+    // off. Raising ExtendCoronaBuffer does not fix it -- any fixed capacity can
+    // be exhausted once nothing is culled.
+    //
+    // The second site is a per-corona range check in the render pass rather than
+    // an allocator, so it does not exhaust anything, but it draws coronas past
+    // the range they were authored with. Both are gated on the one setting.
     if (config.bypassDistanceCulling) {
+        Logger::Get().Warn("DrawDistanceFix",
+            "BypassDistanceCulling is enabled. This is known to make 2DFX coronas "
+            "flicker: it removes the distance test guarding a fixed-size corona "
+            "slot table, which then silently drops whichever coronas find no free "
+            "slot that frame. Set it to 0 if lampposts flicker.");
         Logger::Get().Info("DrawDistanceFix", "Bypassing early-out distance culling checks...");
         const uint8_t vanillaCull1[] = { 0x0F, 0x84, 0x9E, 0x02, 0x00, 0x00 };
         Patch::Nop("Distance Culling Bypass 1", kCullingEarlyOut1, vanillaCull1, sizeof(vanillaCull1));

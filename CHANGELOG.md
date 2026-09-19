@@ -2,6 +2,30 @@
 
 ## 1.1.2
 
+### Changed
+
+**`BypassDistanceCulling` now ships off.** It was the cause of 2DFX coronas
+flickering on and off, reported separately from the disappearing-lamppost bug
+below.
+
+One of the two checks it removes is the `dx*dx + dy*dy > radius*radius` test
+guarding the corona slot allocator in `sub_511130`. That allocator scans a
+fixed-size table linearly for a slot whose owner id matches, then for a free one,
+and if neither scan finds anything it returns without drawing:
+
+    5112E0: scan for a slot whose owner id == 0
+    5112FF: cmp ax, <capacity> / jz 511473    <- no slot, corona dropped
+
+With the distance test gone, every corona on the map competes for slots every
+frame. Which ones lose depends on call order, which shifts as sectors stream, so
+a different set is dropped each frame. Raising `ExtendCoronaBuffer` does not fix
+this; any fixed capacity fills once nothing is culled, which is why the reporter
+saw flickering at both 56 and 1024 slots.
+
+The setting remains available and now logs a warning when enabled. Draw distance
+is carried by `LodMultiplier`, `FarClipOverride` and the sector traversal, none
+of which are affected.
+
 ### Fixed
 
 **Lampposts and other 2DFX coronas disappearing with `ExtendCoronaBuffer`.**
