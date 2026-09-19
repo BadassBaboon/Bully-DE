@@ -23,6 +23,12 @@ void Config::Load(const std::filesystem::path& iniPath) {
     int logLevelInt = GetPrivateProfileIntW(L"General", L"LogLevel", 1, pathW.c_str());
     m_general.logLevel = static_cast<LogLevel>(std::clamp(logLevelInt, 0, 3));
     m_general.logToFile = GetPrivateProfileIntW(L"General", L"LogToFile", 1, pathW.c_str()) != 0;
+    // DumpUnpackedBinary moved from [Shadows] to [General]. Read the old
+    // location as the fallback default, so an INI written before the move keeps
+    // its setting rather than silently reverting to 0.
+    const int dumpLegacy = GetPrivateProfileIntW(L"Shadows", L"DumpUnpackedBinary", 0, pathW.c_str());
+    m_general.dumpUnpackedBinary =
+        GetPrivateProfileIntW(L"General", L"DumpUnpackedBinary", dumpLegacy, pathW.c_str()) != 0;
 
     // [Shadows]
     m_shadows.enabled = GetPrivateProfileIntW(L"Shadows", L"EnableShadowImprovements", 1, pathW.c_str()) != 0;
@@ -49,7 +55,6 @@ void Config::Load(const std::filesystem::path& iniPath) {
     m_shadows.shadowBudgetMB = static_cast<uint32_t>(std::clamp(budget, 0, 3072));
 
     m_shadows.disableBlobShadows = GetPrivateProfileIntW(L"Shadows", L"DisableBlobShadows", 0, pathW.c_str()) != 0;
-    m_shadows.dumpUnpackedBinary = GetPrivateProfileIntW(L"Shadows", L"DumpUnpackedBinary", 0, pathW.c_str()) != 0;
     m_shadows.forceDistanceShadows = GetPrivateProfileIntW(L"Shadows", L"ForceDistanceShadows", 1, pathW.c_str()) != 0;
 
     // [Bloom]
@@ -143,6 +148,7 @@ void Config::Save(const std::filesystem::path& iniPath) {
 
     WritePrivateProfileStringW(L"General", L"LogLevel", std::to_wstring(static_cast<int>(m_general.logLevel)).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"General", L"LogToFile", m_general.logToFile ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"General", L"DumpUnpackedBinary", m_general.dumpUnpackedBinary ? L"1" : L"0", pathW.c_str());
 
     WritePrivateProfileStringW(L"Shadows", L"EnableShadowImprovements", m_shadows.enabled ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"Shadows", L"ShadowMapResolution", std::to_wstring(m_shadows.shadowMapResolution).c_str(), pathW.c_str());
@@ -150,7 +156,6 @@ void Config::Save(const std::filesystem::path& iniPath) {
     WritePrivateProfileStringW(L"Shadows", L"ShadowGeneratorCount", std::to_wstring(m_shadows.shadowGeneratorCount).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"Shadows", L"ShadowBudgetMB", std::to_wstring(m_shadows.shadowBudgetMB).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"Shadows", L"DisableBlobShadows", m_shadows.disableBlobShadows ? L"1" : L"0", pathW.c_str());
-    WritePrivateProfileStringW(L"Shadows", L"DumpUnpackedBinary", m_shadows.dumpUnpackedBinary ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"Shadows", L"ForceDistanceShadows", m_shadows.forceDistanceShadows ? L"1" : L"0", pathW.c_str());
 
     WritePrivateProfileStringW(L"Bloom", L"EnableBloomChanges", m_bloom.enabled ? L"1" : L"0", pathW.c_str());

@@ -15,7 +15,7 @@ Usage:
 
 The dump is a raw memory image loaded at 0x400000, so a virtual address maps to
 a file offset by subtracting the base. Produce one by setting
-DumpUnpackedBinary = 1 in the INI.
+DumpUnpackedBinary = 1 under [General] in the INI.
 
 Exits non-zero if an uncovered reference is found.
 """
@@ -65,7 +65,7 @@ def main():
     dump = sys.argv[1] if len(sys.argv) > 1 else r"E:\BullyDE\Bully_unpacked.exe"
     if not os.path.isfile(dump):
         print(f"unpacked image not found: {dump}")
-        print("set DumpUnpackedBinary = 1 in the INI and launch once to produce it")
+        print("set [General] DumpUnpackedBinary = 1 in the INI and launch once to produce it")
         return 2
 
     count, covered = patched_bytes()

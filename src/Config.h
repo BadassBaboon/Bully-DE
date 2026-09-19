@@ -12,7 +12,6 @@ struct ShadowSettings {
     uint32_t shadowGeneratorCount{ 8 };   // Simultaneous shadow-casting lights (vanilla 8, NiShadowManager+0xB4)
     uint32_t shadowBudgetMB{ 0 };         // NiShadowManager map budget in MB; 0 = auto-size from resolution
     bool disableBlobShadows{ false };     // Disable legacy 2D capsule blob decals (shad_ped/shad_car)
-    bool dumpUnpackedBinary{ false };     // Dump the decrypted Bully.exe image next to the .asi, for IDA
     bool forceDistanceShadows{ true };    // Force NiShadowGenerator perspective projection / distance rendering (0x0040FCDA)
 };
 
@@ -68,6 +67,7 @@ struct DiagnosticsSettings {
 struct GeneralSettings {
     LogLevel logLevel{ LogLevel::Info };
     bool logToFile{ true };
+    bool dumpUnpackedBinary{ false };    // Dump the decrypted Bully.exe image next to the .asi, for IDA
 };
 
 class Config {

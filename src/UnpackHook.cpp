@@ -61,7 +61,7 @@ void UnpackHook::Trigger() {
     Logger::Get().Info("UnpackHook", "Executable unpacked in memory. Initializing modules...");
 
     // Dump decrypted memory for IDA reverse engineering (debug aid, off by default)
-    if (Config::Get().Shadows().dumpUnpackedBinary) {
+    if (Config::Get().General().dumpUnpackedBinary) {
         DumpUnpackedExecutable();
     }
 
