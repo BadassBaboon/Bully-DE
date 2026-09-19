@@ -183,9 +183,10 @@ bend.
 **MSAA flickering is not fully fixable from an ASI.** It comes from the
 alpha-tested textures themselves, not only from render state.
 
-**Shadow bias is untouched.** Smaller texels need less bias than the stock value
-assumes, so at 8192 shadows may sit slightly away from the base of the object
-casting them. Both write sites are identified in the research notes.
+**Shadow bias is not adjustable.** The field that looked like a per-light depth
+bias was tried and does nothing useful; the details are in `docs/RESEARCH.md`.
+In practice shadows sit correctly against their casters at 8192 anyway, so
+there was nothing to correct.
 
 Tested on the Steam release on Windows. The signature checks mean other builds
 refuse to patch rather than corrupt themselves, but nothing else has been tried.
