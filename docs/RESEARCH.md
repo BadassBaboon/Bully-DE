@@ -156,10 +156,38 @@ The pushed pointer is the immediate at `0x40F9B5`. Techniques are registered in
   where `i` comes from the light type and the `0x10` flag.
 - The inline path at `0x40FD15` reads a per-light float at `lightDef+128`.
 
-Which one runs depends on a byte at `lightDef+126`. Neither is patched today.
-Raising the resolution shrinks each texel, so a bias tuned for 1024 is larger
-than it needs to be at 8192; if shadows detach from the base of objects, this is
-where to look.
+Which one runs depends on a byte at `lightDef+126`. Both converge at
+`0x0040FD1E`, so a single hook covers them.
+
+### Tried, and it does nothing
+
+A multiplier on `generator+0x54` was implemented at that convergence point and
+measured in game at 0.1x. No visible change at all.
+
+`sub_759570` shows why. It builds each technique and fills the table in place;
+for `NiPCFShadowTechnique`, which is what this game uses:
+
+```
+technique+0x20 = 0.0        technique+0x2C = 0.0001
+technique+0x24 = 0.98       technique+0x30 = 0.96
+technique+0x28 = 0.0        technique+0x34 = 0.0001
+```
+
+Six floats, matching `sub_40DDB0`'s index range of 0-5. **Several entries are
+exactly 0.0**, and multiplying zero gives zero, so for any light type selecting
+those entries the knob could not do anything at any value. A multiplier was the
+wrong operator for this field.
+
+The magnitudes also argue against the "depth bias" label this section inherited:
+0.98 and 0.96 look like depth-comparison thresholds, and only the 0.0001 pair
+looks bias-like. `sub_772480` compares `generator+0x54` against the table entry
+it should hold, which reads as a "still current?" check rather than a tunable.
+
+Worth knowing before trying again: shadows sit correctly against their casters
+at 8192 in normal play, so there is no observed problem here to fix. Anyone
+picking this up should first identify which of the six entries a Bully spot
+light actually selects, and find the instruction that consumes the value, before
+assuming it is a bias at all.
 
 ## Bloom
 
