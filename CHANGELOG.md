@@ -59,6 +59,11 @@ correcting a problem that was not occurring. The findings are in
 
 ### Changed
 
+**`DumpUnpackedBinary` moved from `[Shadows]` to `[General]`.** It has nothing
+to do with shadows; it dumps the decrypted executable for disassembly. The old
+location is still read as a fallback, so an INI written before this keeps its
+setting instead of silently reverting.
+
 **`BypassDistanceCulling` now ships off.** It was the cause of 2DFX coronas
 flickering on and off, reported separately from the disappearing-lamppost bug
 below.

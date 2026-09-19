@@ -670,7 +670,7 @@ Retail `Bully.exe` is packed. Addresses cannot be found in the file on disk.
 `UnpackHook` hooks `SystemParametersInfoA` through the import table, which the
 packer calls after unpacking itself in memory. The mod checks for a known
 unpacked byte pattern at `0x860C6B` first, in case it loaded late. Set
-`DumpUnpackedBinary = 1` in the INI to write the decrypted image to
+`DumpUnpackedBinary = 1` under `[General]` in the INI to write the decrypted image to
 `Bully_unpacked.exe` next to the `.asi` on the next launch, and load that in IDA.
 It is off by default because it writes 29 MB on every start.
 

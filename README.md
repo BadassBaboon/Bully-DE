@@ -92,6 +92,7 @@ it. The tables below are the summary.
 | `ShadowBudgetMB` | `0` (auto) | This is the setting that decides whether shadows survive at distance, not the resolution. |
 | `ShadowTechnique` | `1` (PCF) | `0` is hard-edged with no filtering. |
 | `ShadowGeneratorCount` | `8` | Do not raise. Every shipped shader binds exactly four spot-shadow slots, so a fifth light has nowhere to go. |
+| `ForceDistanceShadows` | `1` | Makes every active light keep its shadow projection at distance instead of dropping it. This is what stops shadows vanishing as you move away. |
 | `DisableBlobShadows` | `0` | Removes the flat oval decals under characters. They are separate from the mesh shadows the spot lights cast, so this takes away ground contact where those lights do not reach. |
 
 ### Bloom, AA and post-processing
@@ -102,7 +103,7 @@ it. The tables below are the summary.
 | `BloomMode` | `0` | `1` forces bloom on everywhere, `2` off entirely. |
 | `BloomThreshold` / `BloomStrength` / `BloomScale` | `-1` | `-1` keeps the game's own per-area values (230 / 80 / 4). |
 | `EnableAAFixes` | `1` | Only does anything with MSAA actually enabled. |
-| `DisableDistanceFog` / `DisableMotionBlur` | `1` | |
+| `DisableDistanceFog` / `DisableMotionBlur` | `0` | Both ship off, so the game looks as it shipped. Read the note below on what "fog" actually is before turning it on. |
 | `LogPostFXState` | `0` | Read-only diagnostic. Samples the screen-effect gate state once a second and logs it when it changes. Patches nothing. |
 
 ### Stability
