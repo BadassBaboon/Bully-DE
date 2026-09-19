@@ -29,6 +29,34 @@ it did anything in a given session.
 Credit to nixkiez, whose Patch Fixes mod identified these two sites. The
 implementation here is our own, written against the game binary.
 
+### Removed
+
+**Shadow bias adjustment.** Tried and dropped. `NiShadowGenerator+0x54` is
+documented as a per-light depth bias, and `sub_40FB30` writes it every frame
+from a six-float table on the shadow technique. A multiplier on that field was
+implemented and measured at 0.1x, and produced no visible change.
+
+`sub_759570` explains why. It initialises the PCF technique's table directly:
+
+    v6[8]  = 0.0        v6[11] = 0.0001
+    v6[9]  = 0.98       v6[12] = 0.96
+    v6[10] = 0.0        v6[13] = 0.0001
+
+Several entries are exactly zero, and a multiplier cannot move zero -- at any
+setting, the light types selecting those entries were unaffected. The 0.98 and
+0.96 values also read as comparison thresholds rather than a bias, so the
+"depth bias" label is doubtful.
+
+Shadows sit correctly against their casters at 8192 in practice, so this was
+correcting a problem that was not occurring. The findings are in
+`docs/RESEARCH.md`.
+
+### Fixed
+
+- `std::stof` on `LodMultiplier` had no exception handling, the same fault
+  already fixed for `FarClipOverride`. A malformed value killed the process from
+  `DllMain` before the game started.
+
 ### Changed
 
 **`BypassDistanceCulling` now ships off.** It was the cause of 2DFX coronas
