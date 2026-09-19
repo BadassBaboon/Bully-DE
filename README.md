@@ -105,6 +105,12 @@ it. The tables below are the summary.
 | `DisableDistanceFog` / `DisableMotionBlur` | `1` | |
 | `LogPostFXState` | `0` | Read-only diagnostic. Samples the screen-effect gate state once a second and logs it when it changes. Patches nothing. |
 
+### Stability
+
+| Setting | Default | Notes |
+|---|---|---|
+| `FixHeapFreeList` | `1` | Guards two heap routines that follow a linked-list neighbour and write through it without checking it exists. On a healthy list the guards never fire; the log says how many times they caught something. |
+
 ## What "fog" means in this game
 
 Two different things get called fog, and only one of them is fog.
@@ -198,5 +204,9 @@ something other than what they were believed to do.
 
 Silent, for [SilentPatchBully](https://github.com/CookiePLMonster/SilentPatchBully),
 which is where the process-attach and patching approach came from.
+
+nixkiez, whose Patch Fixes mod identified the two heap free-list routines behind
+`FixHeapFreeList`. The implementation here is our own, written against the game
+binary.
 
 ThirteenAG, for Ultimate ASI Loader.

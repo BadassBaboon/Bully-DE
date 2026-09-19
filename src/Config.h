@@ -54,6 +54,13 @@ struct GraphicsSettings {
     bool disableMotionBlur{ false };     // Disable motion blur by blanking shader uniforms
 };
 
+struct StabilitySettings {
+    // Guards two heap free-list routines that dereference list neighbours
+    // without a null check (sub_5EEBF0 / sub_5EECA0). Pure crash safety: on a
+    // healthy list the guards never fire and behaviour is identical.
+    bool fixHeapFreeList{ true };
+};
+
 struct DiagnosticsSettings {
     bool logPostFXState{ false };    // Sample and log the screen-effect gate state each second
 };
@@ -75,6 +82,7 @@ public:
     const DrawDistanceSettings& DrawDistance() const { return m_drawDist; }
     const AASettings& AntiAliasing() const { return m_aa; }
     const GraphicsSettings& Graphics() const { return m_graphics; }
+    const StabilitySettings& Stability() const { return m_stability; }
     const DiagnosticsSettings& Diagnostics() const { return m_diag; }
     const GeneralSettings& General() const { return m_general; }
     const std::filesystem::path& GetIniPath() const { return m_iniPath; }
@@ -87,6 +95,7 @@ private:
     DrawDistanceSettings m_drawDist;
     AASettings m_aa;
     GraphicsSettings m_graphics;
+    StabilitySettings m_stability;
     DiagnosticsSettings m_diag;
     GeneralSettings m_general;
     std::filesystem::path m_iniPath;

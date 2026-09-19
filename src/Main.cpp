@@ -8,6 +8,7 @@
 #include "features/DrawDistanceFix.h"
 #include "features/AAFix.h"
 #include "features/GraphicsFix.h"
+#include "features/StabilityFix.h"
 #include "features/Diagnostics.h"
 
 namespace {
@@ -46,6 +47,7 @@ namespace {
             BullyDE::DrawDistanceFix::Install();
             BullyDE::AAFix::Install();
             BullyDE::GraphicsFix::Install();
+            BullyDE::StabilityFix::Install();
             BullyDE::Diagnostics::Install();
         });
     }
@@ -70,6 +72,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         // mutex and taking it here would hang the process on exit. The OS
         // reclaims the file handle regardless, so there is nothing to do.
         if (lpvReserved == nullptr) {
+            BullyDE::StabilityFix::Report();
             BullyDE::Logger::Get().Info("Core", "Bully: Definitive Edition unloading.");
             BullyDE::Logger::Get().Shutdown();
         }

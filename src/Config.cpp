@@ -126,6 +126,9 @@ void Config::Load(const std::filesystem::path& iniPath) {
     m_graphics.disableDistanceFog = GetPrivateProfileIntW(L"Graphics", L"DisableDistanceFog", 0, pathW.c_str()) != 0;
     m_graphics.disableMotionBlur = GetPrivateProfileIntW(L"Graphics", L"DisableMotionBlur", 0, pathW.c_str()) != 0;
 
+    // [Stability]
+    m_stability.fixHeapFreeList = GetPrivateProfileIntW(L"Stability", L"FixHeapFreeList", 1, pathW.c_str()) != 0;
+
     // [Diagnostics]
     m_diag.logPostFXState = GetPrivateProfileIntW(L"Diagnostics", L"LogPostFXState", 0, pathW.c_str()) != 0;
 }
@@ -174,6 +177,7 @@ void Config::Save(const std::filesystem::path& iniPath) {
     WritePrivateProfileStringW(L"Graphics", L"DisableDistanceFog", m_graphics.disableDistanceFog ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"Graphics", L"DisableMotionBlur", m_graphics.disableMotionBlur ? L"1" : L"0", pathW.c_str());
 
+    WritePrivateProfileStringW(L"Stability", L"FixHeapFreeList", m_stability.fixHeapFreeList ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"Diagnostics", L"LogPostFXState", m_diag.logPostFXState ? L"1" : L"0", pathW.c_str());
 }
 

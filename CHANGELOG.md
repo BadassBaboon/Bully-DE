@@ -1,6 +1,33 @@
 # Changelog
 
-## 1.1.2
+## 1.2.0
+
+### Added
+
+**Heap free-list guards (`FixHeapFreeList`, on by default).** The game keeps
+free memory blocks on a doubly-linked list. Two routines maintain it, and both
+follow a neighbour pointer and write through it without checking it is there:
+
+    sub_5EEBF0  mov edx,[ecx+10h]  /  mov [edx+14h],eax
+    sub_5EECA0  mov ecx,[eax+10h]  /  mov [ecx+14h],edx
+                mov edx,[eax+14h]  /  mov [edx+10h],ecx
+
+With a missing neighbour those become writes to addresses 0x10 and 0x14, which
+faults inside the allocator. The call stack is useless when it happens, because
+the fault lands underneath whatever asked for memory rather than in the code
+that caused it.
+
+Both are replaced with the same logic plus null checks, and a check that a
+neighbour points back at this node before unlinking through it. On a healthy
+list the guards never fire and behaviour is identical. Return values are
+preserved -- callers use them, and at `0x005EF2B2` the insert result becomes the
+caller's own return value.
+
+The log reports how many times a guard caught something, so you can tell whether
+it did anything in a given session.
+
+Credit to nixkiez, whose Patch Fixes mod identified these two sites. The
+implementation here is our own, written against the game binary.
 
 ### Changed
 
