@@ -279,6 +279,18 @@ __declspec(naked) static void Hook_AllSectorTraversal() {
     }
 }
 
+// The visible-object list is a fixed 2000-entry array at 0x00C11FC0, with its
+// count immediately after it at 0x00C13F00 -- which is why the guards stop at
+// 1999: entry 2000 would overwrite the count. Once it is full, an object that
+// wanted in is silently dropped for that frame, and a dropped object has no
+// mesh AND no collision, so in an interior you can fall through the floor.
+//
+// Raising draw distance makes the list fill up sooner, so this counter exists to
+// tell whether a report of "the interior vanished" is actually list saturation
+// or something else. It is incremented only on the drop path, so it costs
+// nothing in normal play, and reported on unload.
+volatile LONG s_sectorDrops = 0;
+
 __declspec(naked) static void Hook_SectorGuard1() {
     __asm {
         cmp dword ptr ds:[0x00C13F00], 0x7CF
@@ -288,6 +300,9 @@ __declspec(naked) static void Hook_SectorGuard1() {
         push 0x004525C9
         ret
     loc_skip1:
+        pushfd
+        lock inc dword ptr [s_sectorDrops]
+        popfd
         push 0x004525D7
         ret
     }
@@ -302,6 +317,9 @@ __declspec(naked) static void Hook_SectorGuard2() {
         push 0x004526D9
         ret
     loc_skip2:
+        pushfd
+        lock inc dword ptr [s_sectorDrops]
+        popfd
         push 0x004526E7
         ret
     }
@@ -316,6 +334,9 @@ __declspec(naked) static void Hook_SectorGuard3() {
         push 0x00452899
         ret
     loc_skip3:
+        pushfd
+        lock inc dword ptr [s_sectorDrops]
+        popfd
         push 0x004528A6
         ret
     }
@@ -330,6 +351,9 @@ __declspec(naked) static void Hook_SectorGuard4() {
         push 0x004529EA
         ret
     loc_skip4:
+        pushfd
+        lock inc dword ptr [s_sectorDrops]
+        popfd
         push 0x004529F7
         ret
     }
@@ -344,6 +368,9 @@ __declspec(naked) static void Hook_SectorGuard5() {
         push 0x00452C2A
         ret
     loc_skip5:
+        pushfd
+        lock inc dword ptr [s_sectorDrops]
+        popfd
         push 0x00452C38
         ret
     }
@@ -501,6 +528,20 @@ __declspec(naked) static void Hook_NiCameraFrustum() {
 }
 
 } // namespace
+
+void DrawDistanceFix::Report() {
+    const long drops = InterlockedCompareExchange(&s_sectorDrops, 0, 0);
+    if (drops == 0) {
+        Logger::Get().Info("DrawDistanceFix",
+            "Visible-object list never filled this session (0 dropped objects).");
+        return;
+    }
+    Logger::Get().Warn("DrawDistanceFix",
+        "Visible-object list hit its 2000-entry cap and dropped {} object(s) this "
+        "session. A dropped object has no mesh and no collision, which in an "
+        "interior looks like the room vanishing and the floor giving way. Lower "
+        "LodMultiplier or FarClipOverride if you saw that.", drops);
+}
 
 bool DrawDistanceFix::Install() {
     const auto& config = Config::Get().DrawDistance();

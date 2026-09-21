@@ -72,6 +72,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         // mutex and taking it here would hang the process on exit. The OS
         // reclaims the file handle regardless, so there is nothing to do.
         if (lpvReserved == nullptr) {
+            BullyDE::DrawDistanceFix::Report();
             BullyDE::StabilityFix::Report();
             BullyDE::Logger::Get().Info("Core", "Bully: Definitive Edition unloading.");
             BullyDE::Logger::Get().Shutdown();
