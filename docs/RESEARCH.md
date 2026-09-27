@@ -700,3 +700,157 @@ source shipped. `Shaders\Data\Fragments\Text` holds NDL fragment sources, and
 `Shaders\Generated` exists but is empty. Whether the engine can still compile
 from those fragments at runtime has not been tested, and would be the cheaper
 route to changing the PCF kernel.
+
+
+## The LOD mesh switch is not a draw-distance knob
+
+`flt_C3CD00` at `0x00C3CD00` scales the distance at which an object gives up its
+full-detail mesh:
+
+```
+sub_5273E0:  fld  [esp+arg_0]        ; distance to the object
+             fld  dword [ecx+24h]    ; the object's own switch distance
+             fmul flt_C3CD00
+             fcompp
+             jnz  -> return 0        ; past it: no full-detail model
+             mov  eax, [ecx+20h]     ; else: the full-detail model
+```
+
+It reads like a draw-distance multiplier and it is not. It changes which *mesh*
+is used, not whether the object is drawn at all -- that is the far clip.
+
+**Raising it crashes the game.** This shipped tied to `LodMultiplier`, so the 2.0
+default crashed within a minute or two of gameplay, and it was bisected by
+running each thing `LodMultiplier` touches on its own with the rest at vanilla:
+pools alone at 2x were fine, the switch scale alone at 2x crashed exactly as
+reported.
+
+The call site in `sub_452000` shows the shape of it:
+
+```
+452210: call sub_5273E0        ; pick the model
+452217: test ebx, ebx
+452219: jz   loc_45232F        ; null model is handled properly
+45221f: cmp  dword [edi+18h], 0
+452230: call eax               ; vtable+0x28, load the resource on demand
+452232: mov  eax, [edi+18h]    ; used with no null check after that load
+45223a: call sub_824EC0
+```
+
+The model pointer is checked. The resource fetched immediately afterwards is not.
+Raising the switch distance pushes far more distant objects through that path and
+forces on-demand streaming the game was not built to do.
+
+It is now `LodSwitchScale`, defaulting to 1.0, documented as crash-prone above
+that. Anyone revisiting it should start at the missing null check rather than at
+the multiplier.
+
+### What was ruled out on the way
+
+- **The visible-object list.** A 2000-entry array at `0x00C11FC0` whose count sits
+  immediately after it at `0x00C13F00`, which is what makes 2000 a hard ceiling.
+  It looked like an excellent explanation for interiors vanishing, because a
+  dropped object has neither mesh nor collision. Measured live with Frida at
+  ~60 Hz it peaks at **209/2000 at 2x and 256/2000 at 3x** -- around 10%. It is
+  not involved. The ASI's own 1 Hz sampler was too coarse to establish this; the
+  faster sampling is what settled it.
+- **The 14 LOD pool capacities.** All 14 sites are `mov dword [esi+8], imm32` on
+  pool descriptors built in `sub_44D320`. That looks like constructor field
+  initialisation, but `sub_44AD50` consumes the field as the element count and
+  sizes both allocations from it (`288 * count` and `count`), so they are genuine
+  capacities. Scaling them only allocates more slots. A tester confirmed 2x pools
+  alone causes no crash.
+
+### `0x00BD1008` is the current area id, as an int
+
+Confirmed by reading it live while walking into the BMX Park: it goes `0` to `62`
+and back to `0`. Interpreted as a float it is a denormal, so IDA's `float` typing
+of that address is wrong. Area 0 is the outdoor world. This is the signal to use
+for anything that needs to know whether the player is indoors.
+
+
+## Raising the LOD mesh switch is not achievable, and here is the evidence
+
+`LodSwitchScale` scales the distance at which an object keeps its full-detail
+mesh. Outdoors it works and looks right. It also breaks every interior, and five
+rounds of testing failed to separate the two.
+
+### What it actually is
+
+`flt_C3CD00` at `0x00C3CD00` has **ten readers and no writers**, and its initial
+value in the image is `0.0`. So in a retail session it is zero for the whole
+run, and `sub_5273E0` -- which does `switchDist * flt_C3CD00 <= distance` --
+always returns null. The full-detail mesh path never executes in the shipped
+game. It is dormant, not merely unscaled.
+
+### Do not write the global
+
+Writing `flt_C3CD00` enables all ten readers at once, and most are not about
+mesh detail. `sub_4769C0` is the clearest:
+
+```
+if (dist <= flt_C3CD00 * 25.0 * (flt_C3CD00 * 25.0)) { ...all the work... }
+```
+
+At `0.0` that is `0 <= 0`, always true, so the work always happens. Give the
+global a value and it becomes a live comparison that can fail, and the function
+returns having done nothing.
+
+Only two readers are the mesh switch, and both are the same encoding:
+
+```
+5273E7  d8 0d 00 cd c3 00   fmul flt_C3CD00   (sub_5273E0, selector)
+527424  d8 0d 00 cd c3 00   fmul flt_C3CD00   (sub_527420, accessor)
+```
+
+Repointing those two operands at a private float scales the mesh switch and
+leaves the other eight readers at vanilla. That part works, and is what the mod
+does.
+
+### It still breaks interiors
+
+With only those two operands repointed, and `flt_C3CD00` still `0.0`, the BMX
+Park (area 62) loses its geometry and the player falls through. Tested
+repeatedly. Outdoor distance is visibly correct in the same session, so the
+scaling itself does what it is supposed to.
+
+### Switching it off indoors does not help, and cannot
+
+`sub_4158A0` changes area, and it writes the area id **last**:
+
+```
+4158A0: mov eax, flt_BD1008        ; the OLD area
+        if (old != *a1) sub_668150(...)  ; tear down
+        sub_454240(*a1);                 ; LOADS THE NEW AREA
+        sub_561040(...); sub_4F3720(...) ; camera re-init
+        flt_BD1008 = *a1;                ; id updated only now
+```
+
+So anything watching `0x00BD1008` learns of the change after the interior has
+been built. A 60 Hz poll is not slow, it is structurally too late.
+
+Hooking the function's **entry** and reading the incoming area from its argument
+does set the scale to vanilla before `sub_454240` runs. That was tested, the
+hook applied (`0x004158A0`, five bytes, exactly a `jmp rel32`), the log confirmed
+the scale flipping to 1.0 on entry -- **and the park still broke.**
+
+That is the important result. The failure is not decided during the transition
+and not by the scale in force inside the interior. Running the mesh switch above
+1.0 *outdoors* damages state that survives into the area load.
+
+### Where to pick this up
+
+Anyone revisiting it should start from that last fact rather than from the
+multiplier. The question is what outdoor state at a raised switch the interior
+load later depends on -- not the timing, which is settled, and not the other
+nine readers, which are ruled out.
+
+Ruled out along the way, each by measurement rather than reasoning:
+
+- the 2000-entry visible-object list (peaks at ~10% -- see above)
+- the 14 LOD pool capacities (2x pools alone, no crash, park fine)
+- the camera far clip (park fine at 600 m with the switch at 1.0)
+- the missing null check at `0x452232` (guard installed at both sites, **never
+  fired once**, park still broke)
+- the other eight readers of `flt_C3CD00` (repoint test leaves them vanilla)
+- transition timing (entry hook proves the scale is vanilla before the load)
