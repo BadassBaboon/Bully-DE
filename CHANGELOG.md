@@ -53,6 +53,52 @@ correcting a problem that was not occurring. The findings are in
 
 ### Fixed
 
+**Crashes a minute or two into gameplay, and the BMX Park interior collapsing,
+at `LodMultiplier` 2.0 and above.** Both had the same cause, and it was not the
+draw distance: `LodMultiplier` was also scaling the LOD *mesh switch*, which
+decides how far away an object keeps its full-detail mesh.
+
+That switch is driven by `flt_C3CD00`, a global with ten readers, no writers,
+and an initial value of 0.0 -- so the whole full-detail path is dormant in the
+retail game and raising the value enables code that never normally runs. It
+looks better outdoors and reliably destroys interiors.
+
+The mesh switch is no longer touched at all, and the setting that exposed it has
+been removed rather than shipped as a knob that breaks the game. Draw distance
+is unaffected: it comes from the camera far clip, the fourteen LOD object pools
+and the sector traversal, all of which still scale with `LodMultiplier`.
+
+What this gives up is distant geometry rendering at full detail instead of as
+LOD meshes -- which is what the retail game does at any distance.
+
+`docs/RESEARCH.md` records the six things ruled out on the way, each by
+measurement: the 2000-entry visible-object list, the pool capacities, the far
+clip, a missing null check at `0x452232`, the other eight readers of the global,
+and area-transition timing.
+
+`LodMultiplier` drove four separate things, and a tester bisected them one run at
+a time with everything else held at vanilla:
+
+| Scaled | Result |
+|---|---|
+| nothing (control) | fine |
+| the 14 LOD pool capacities | fine |
+| **the LOD mesh switch scale** | **crashed, as before** |
+
+So the pools were never the problem. `sub_5273E0` multiplies each object's own
+switch distance by `flt_C3CD00` to decide whether to use its full-detail mesh.
+Raising that makes the game request full-detail meshes for distant objects, and
+at the call site in `sub_452000` the returned model is null-checked but the
+resource loaded on demand right after it is not:
+
+    452219: jz   loc_45232F      ; model == null, handled
+    452230: call eax             ; vtable+0x28, on-demand load
+    452232: mov  eax, [edi+18h]  ; used with no null check after the load
+
+Leaving it at 1.0 costs very little. Distant objects draw as their LOD meshes,
+which is what those meshes are for. Draw distance comes from the far clip and the
+pools, and both still scale with `LodMultiplier`.
+
 - `std::stof` on `LodMultiplier` had no exception handling, the same fault
   already fixed for `FarClipOverride`. A malformed value killed the process from
   `DllMain` before the game started.
