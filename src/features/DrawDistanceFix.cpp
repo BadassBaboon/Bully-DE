@@ -229,17 +229,17 @@ static double s_customFarClip = 1200.0;
 constexpr uintptr_t kCullingEarlyOut1 = 0x005111D0;
 constexpr uintptr_t kCullingEarlyOut2 = 0x0051175E;
 
-// 5. LOD mesh switch.
-//
-// The camera-init hook that used to live here wrote LodMultiplier into
-// camera+0x98. That was never a LOD knob: sub_4F3720 sets +0x98 to 1.0 with
-// fld1, and sub_4F58E0 reads it alongside +0x94 (which the same constructor
-// sets to 0) as components of a scale, not a distance. It is gone.
+// The LOD mesh switch used to be scaled here, and the camera-init hook wrote
+// LodMultiplier into camera+0x98. Both are gone. camera+0x98 was never a LOD
+// knob: sub_4F3720 sets it to 1.0 with fld1, and sub_4F58E0 reads it alongside
+// +0x94 (which the same constructor zeroes) as components of a scale, not a
+// distance. Scaling the mesh switch itself breaks every interior -- see
+// docs/RESEARCH.md before trying it again.
 
-// 6. Force High-Detail LOD Models
+// 5. Force High-Detail LOD Models
 constexpr uintptr_t kForceHighLodSite = 0x005273F4;
 
-// 7. Frustum Sector Traversal & Overflow Guard
+// 6. Frustum Sector Traversal & Overflow Guard
 constexpr uintptr_t kAllSectorTraversalSite = 0x0045302D;
 constexpr uintptr_t kSectorGuardSite1       = 0x004525C1;
 constexpr uintptr_t kSectorGuardSite2       = 0x004526D2;
@@ -364,7 +364,7 @@ __declspec(naked) static void Hook_SectorGuard5() {
     }
 }
 
-// 8. Distant Horizon Cliff & Mountain Terrain Draw Distance
+// 7. Distant Horizon Cliff & Mountain Terrain Draw Distance
 // sub_516DC0:
 //   0x00516EC9: 85 DB                         test ebx, ebx            ; 2 bytes
 //   0x00516ECB: 8B 9C 24 AC 00 00 00          mov ebx, [esp+0ACh]       ; 7 bytes
@@ -413,7 +413,7 @@ __declspec(naked) static void Hook_TerrainDrawDistance() {
     }
 }
 
-// 9. Radar / Minimap Ambient Ped Blip Filter
+// 8. Radar / Minimap Ambient Ped Blip Filter
 // sub_402E90:
 //   0x00403083: 8B 92 48 01 00 00 -> mov edx, [edx+148h] (followed by call edx at 0x40309A)
 //   The virtual method is __stdcall with 7 arguments (28 bytes = 0x1C).
@@ -474,7 +474,7 @@ __declspec(naked) static void Hook_RadarBlipFilter() {
     }
 }
 
-// 10. NiCamera::SetViewFrustum (DirectX 9 Hardware Projection Matrix Near/Far Clip)
+// 9. NiCamera::SetViewFrustum (DirectX 9 Hardware Projection Matrix Near/Far Clip)
 // In sub_762D80:
 //   0x00762DDF: D9 42 14 D9 99 18 01 00 00 8A 42 18 88 81 1C 01 00 00 C2 04 00 (21 bytes)
 constexpr uintptr_t kNiCameraFrustumSite = 0x00762DDF;
@@ -643,14 +643,14 @@ bool DrawDistanceFix::Install() {
         Patch::Nop("Distance Culling Bypass 2", kCullingEarlyOut2, vanillaCull2, sizeof(vanillaCull2));
     }
 
-    // 6. Force High-Detail Models (No LOD Switching)
+    // 5. Force High-Detail Models (No LOD Switching)
     if (config.forceHighDetailModels) {
         Logger::Get().Info("DrawDistanceFix", "Forcing high-detail models everywhere (disabling LOD mesh switching)...");
         const uint8_t vanillaHighLod[] = { 0x75, 0x06 };
         Patch::Nop("Force High Detail Models", kForceHighLodSite, vanillaHighLod, sizeof(vanillaHighLod));
     }
 
-    // 7. Frustum Sector Traversal & Overflow Guard
+    // 6. Frustum Sector Traversal & Overflow Guard
     if (config.enableSectorOverflowGuard) {
         Logger::Get().Info("DrawDistanceFix", "Installing Frustum Sector Traversal & Overflow Guards...");
 
@@ -689,7 +689,7 @@ bool DrawDistanceFix::Install() {
         Logger::Get().Info("DrawDistanceFix", "Installed 5 sector insertion bounds guards.");
     }
 
-    // 8. Corona / Visible Light Table Expansion (56 -> 1024)
+    // 7. Corona / Visible Light Table Expansion (56 -> 1024)
     if (config.extendCoronaBuffer) {
         Logger::Get().Info("DrawDistanceFix", "Expanding Corona/Light table from 56 to 1024 slots...");
         DWORD oldProtect = 0;
@@ -709,7 +709,7 @@ bool DrawDistanceFix::Install() {
         }
     }
 
-    // 9. Horizon Cliff & Mountain Terrain Draw Distance
+    // 8. Horizon Cliff & Mountain Terrain Draw Distance
     if (config.extendTerrainDrawDistance) {
         const uint8_t vanillaTerrain[9] = { 0x85, 0xDB, 0x8B, 0x9C, 0x24, 0xAC, 0x00, 0x00, 0x00 };
         if (Patch::Verify("Terrain draw distance check", kTerrainDrawDistSite, vanillaTerrain, sizeof(vanillaTerrain))) {
@@ -718,7 +718,7 @@ bool DrawDistanceFix::Install() {
         }
     }
 
-    // 10. Radar / Minimap Ambient Ped Blip Filter
+    // 9. Radar / Minimap Ambient Ped Blip Filter
     if (config.filterRadarPedBlips) {
         const uint8_t vanillaRadar[6] = { 0x8B, 0x92, 0x48, 0x01, 0x00, 0x00 };
         if (Patch::Verify("Radar ped blip dispatch", kRadarBlipFilterSite, vanillaRadar, sizeof(vanillaRadar))) {
@@ -733,7 +733,7 @@ bool DrawDistanceFix::Install() {
         }
     }
 
-    // 11. NiCamera::SetViewFrustum (DirectX 9 Hardware Projection Matrix Near/Far Clip)
+    // 10. NiCamera::SetViewFrustum (DirectX 9 Hardware Projection Matrix Near/Far Clip)
     if (config.farClipOverride > 0.0f) {
         s_customFarClipFloat = config.farClipOverride;
     } else {
