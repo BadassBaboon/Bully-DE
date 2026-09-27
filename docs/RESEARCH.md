@@ -702,78 +702,134 @@ from those fragments at runtime has not been tested, and would be the cheaper
 route to changing the PCF kernel.
 
 
-## The LOD mesh switch is not a draw-distance knob
+## The heap free-list has two unguarded null dereferences
 
-`flt_C3CD00` at `0x00C3CD00` scales the distance at which an object gives up its
-full-detail mesh:
-
-```
-sub_5273E0:  fld  [esp+arg_0]        ; distance to the object
-             fld  dword [ecx+24h]    ; the object's own switch distance
-             fmul flt_C3CD00
-             fcompp
-             jnz  -> return 0        ; past it: no full-detail model
-             mov  eax, [ecx+20h]     ; else: the full-detail model
-```
-
-It reads like a draw-distance multiplier and it is not. It changes which *mesh*
-is used, not whether the object is drawn at all -- that is the far clip.
-
-**Raising it crashes the game.** This shipped tied to `LodMultiplier`, so the 2.0
-default crashed within a minute or two of gameplay, and it was bisected by
-running each thing `LodMultiplier` touches on its own with the rest at vanilla:
-pools alone at 2x were fine, the switch scale alone at 2x crashed exactly as
-reported.
-
-The call site in `sub_452000` shows the shape of it:
+The game keeps free memory blocks on a doubly-linked list with an array of
+bucket heads indexed by size. Block layout, from the offsets the code uses:
 
 ```
-452210: call sub_5273E0        ; pick the model
-452217: test ebx, ebx
-452219: jz   loc_45232F        ; null model is handled properly
-45221f: cmp  dword [edi+18h], 0
-452230: call eax               ; vtable+0x28, load the resource on demand
-452232: mov  eax, [edi+18h]    ; used with no null check after that load
-45223a: call sub_824EC0
++0x00  uint32  size
++0x10  Block*  next
++0x14  Block*  prev
 ```
 
-The model pointer is checked. The resource fetched immediately afterwards is not.
-Raising the switch distance pushes far more distant objects through that path and
-forces on-demand streaming the game was not built to do.
+Two routines maintain it, and both write through a neighbour pointer without
+checking it:
 
-It is now `LodSwitchScale`, defaulting to 1.0, documented as crash-prone above
-that. Anyone revisiting it should start at the missing null check rather than at
-the multiplier.
+```
+sub_5EEBF0  insert                   sub_5EECA0  unlink
+  8b 51 10  mov edx,[ecx+10h]          8b 48 10  mov ecx,[eax+10h]  ; next
+  89 42 14  mov [edx+14h],eax  **      8b 50 14  mov edx,[eax+14h]  ; prev
+                                       89 51 14  mov [ecx+14h],edx  **
+                                       89 4a 10  mov [edx+10h],ecx  **
+```
 
-### What was ruled out on the way
+With a missing neighbour those become writes to addresses `0x10` and `0x14`.
+The crash lands inside the allocator, underneath whatever asked for memory, so
+the call stack points nowhere useful.
 
-- **The visible-object list.** A 2000-entry array at `0x00C11FC0` whose count sits
-  immediately after it at `0x00C13F00`, which is what makes 2000 a hard ceiling.
-  It looked like an excellent explanation for interiors vanishing, because a
-  dropped object has neither mesh nor collision. Measured live with Frida at
-  ~60 Hz it peaks at **209/2000 at 2x and 256/2000 at 3x** -- around 10%. It is
-  not involved. The ASI's own 1 Hz sampler was too coarse to establish this; the
-  faster sampling is what settled it.
-- **The 14 LOD pool capacities.** All 14 sites are `mov dword [esi+8], imm32` on
-  pool descriptors built in `sub_44D320`. That looks like constructor field
-  initialisation, but `sub_44AD50` consumes the field as the element count and
-  sizes both allocations from it (`288 * count` and `count`), so they are genuine
-  capacities. Scaling them only allocates more slots. A tester confirmed 2x pools
-  alone causes no crash.
+Calling conventions matter if you replace these: insert is thiscall with two
+stack arguments (`retn 8`), unlink thiscall with one (`retn 4`), and **both
+return a value that callers use** -- at `0x005EF2B2` the insert result becomes
+the caller's own return value. `__fastcall` with an unused second parameter
+reproduces that exactly in C++: ecx holds the first argument, edx is ignored,
+the rest go on the stack, and the callee cleans them.
 
-### `0x00BD1008` is the current area id, as an int
+Bucket index, shared by both routines:
 
-Confirmed by reading it live while walking into the BMX Park: it goes `0` to `62`
-and back to `0`. Interpreted as a float it is a denormal, so IDA's `float` typing
-of that address is wrong. Area 0 is the outdoor world. This is the signal to use
-for anything that needs to know whether the player is indoors.
+```
+idx = 0;
+if (size >= 0x20) do { if (idx >= 19) break; ++idx; } while (size >> (idx + 5));
+```
 
+Credit to nixkiez, whose Patch Fixes mod identified these two sites.
 
-## Raising the LOD mesh switch is not achievable, and here is the evidence
+## The LOD object pools are real capacities
 
-`LodSwitchScale` scales the distance at which an object keeps its full-detail
-mesh. Outdoors it works and looks right. It also breaks every interior, and five
-rounds of testing failed to separate the two.
+All fourteen sites are `mov dword ptr [esi+8], imm32` on pool descriptors built
+in `sub_44D320`. That *looks* like constructor field initialisation, and it was
+briefly mistaken for exactly that. It is not: `sub_44AD50` consumes the field as
+an element count and sizes both allocations from it.
+
+```
+*(DWORD*)this       = alloc(288 * this->count);   // element array, 288-byte stride
+*((DWORD*)this + 1) = alloc(this->count);         // one flag byte per element
+```
+
+So scaling them only allocates more slots, which is harmless. A tester confirmed
+2x pools alone causes no crash and does not break interiors. Do not go looking
+here again.
+
+## The visible-object list is a hard 2000 entries
+
+The array is at `0x00C11FC0` and its count at `0x00C13F00` -- **immediately
+after it**, which is what makes 2000 a ceiling rather than a suggestion: writing
+entry 2000 overwrites the count. `sub_451530` iterates `dword_C11FC0[i]` for
+`i < dword_C13F00` calling vtable+68 on each.
+
+The mod's guards stop insertion at 1999. A refused insertion is silently
+dropped, and a dropped object has neither mesh nor collision, so saturation
+would look exactly like geometry vanishing and floors giving way.
+
+**It does not saturate in practice.** Measured live at ~60 Hz with Frida, the
+list peaks at **209/2000 at LodMultiplier 2x and 256/2000 at 3x** -- about 10%.
+It is an excellent-sounding explanation for missing interiors and it is not the
+one. The mod counts refusals anyway, reported by the diagnostics watcher, so if
+it ever does fill you get a log line rather than silence.
+
+## DllMain's detach handler does not run when the game quits
+
+`DLL_PROCESS_DETACH` fires with `lpvReserved` **non-null** when the process is
+terminating, and null only for an explicit `FreeLibrary`. Quitting a game is
+process termination. The mod deliberately does nothing in the non-null case,
+because other threads are already dead and one of them may hold the logger mutex
+-- taking it there hangs the process on exit.
+
+The consequence is easy to miss: **anything reported from the detach path never
+appears.** Two counters were reported that way and produced empty logs, and a
+whole test cycle was spent on runs that could not have printed anything. The
+logger's "Session Ended" banner still appears, because it comes from a static
+destructor, which makes the log look complete.
+
+Report from a thread while the game runs instead. That also survives a crash and
+carries a timestamp you can line up against what you were doing.
+
+## Live probing with Frida
+
+The unpacked image is based at `0x400000`, so once the game is in gameplay every
+address in this document can be read directly. `tools/probe_drawdistance.py`
+does this read-only: no `Interceptor`, no code patching, nothing written to the
+process, which matters because the retail executable is SecuROM-packed.
+
+Two practical notes, both learned the hard way:
+
+- **Injection needs an Administrator terminal.** Without it the agent is refused
+  and the error looks like anti-tamper. It is not; the game keeps running
+  perfectly after a failed injection, which is how you tell the difference.
+- **Attach after reaching gameplay**, not at the menu, so the image is decrypted.
+
+Sampling rate is the reason this was worth doing at all. The mod's own watcher
+polls once a second, and the visible-object count is reset every frame, so it
+sees roughly one frame in sixty and can miss a peak entirely. Frida at 60 Hz is
+what established the list never fills.
+
+`tools/catch_crash.py` catches access violations the same way. **Filter to
+`details.type === 'access-violation'` and to addresses inside the image.**
+Without that filter it also catches every C++ throw the game makes as ordinary
+control flow -- roughly 13,000 `RaiseException` events per minute -- and buries
+anything real.
+
+## The LOD mesh switch: investigated at length, not achievable
+
+**If you are here because you want better distant detail, read this whole
+section before writing any code. Five rounds of testing went into it and four
+plausible explanations were wrong.**
+
+There was briefly a `LodSwitchScale` setting for this. **It was removed**, and
+the mod no longer touches the mesh switch at all. It scaled the distance at
+which an object keeps its full-detail mesh: outdoors it worked and looked right,
+and it also broke every interior. Five rounds of testing failed to separate the
+two, which is why it is gone rather than shipped with a warning.
 
 ### What it actually is
 
