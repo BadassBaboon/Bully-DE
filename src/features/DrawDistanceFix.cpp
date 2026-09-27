@@ -229,24 +229,12 @@ static double s_customFarClip = 1200.0;
 constexpr uintptr_t kCullingEarlyOut1 = 0x005111D0;
 constexpr uintptr_t kCullingEarlyOut2 = 0x0051175E;
 
-// 5. Global LOD Distance Multiplier Hook
-constexpr uintptr_t kCameraInitHookSite   = 0x004F3720;
-constexpr uintptr_t kCameraInitResume     = 0x004F372E;
-constexpr uintptr_t kGlobalLodVar         = 0x00C3CD00;
-
-static float s_customLodMult = 2.0f;
-
-__declspec(naked) static void Hook_CameraInit() {
-    __asm {
-        push ebx
-        xor ebx, ebx
-        push esi
-        mov esi, ecx
-        mov eax, dword ptr [s_customLodMult]
-        mov [esi+98h], eax
-        jmp dword ptr [kCameraInitResume]
-    }
-}
+// 5. LOD mesh switch.
+//
+// The camera-init hook that used to live here wrote LodMultiplier into
+// camera+0x98. That was never a LOD knob: sub_4F3720 sets +0x98 to 1.0 with
+// fld1, and sub_4F58E0 reads it alongside +0x94 (which the same constructor
+// sets to 0) as components of a scale, not a distance. It is gone.
 
 // 6. Force High-Detail LOD Models
 constexpr uintptr_t kForceHighLodSite = 0x005273F4;
@@ -529,19 +517,10 @@ __declspec(naked) static void Hook_NiCameraFrustum() {
 
 } // namespace
 
-void DrawDistanceFix::Report() {
-    const long drops = InterlockedCompareExchange(&s_sectorDrops, 0, 0);
-    if (drops == 0) {
-        Logger::Get().Info("DrawDistanceFix",
-            "Visible-object list never filled this session (0 dropped objects).");
-        return;
-    }
-    Logger::Get().Warn("DrawDistanceFix",
-        "Visible-object list hit its 2000-entry cap and dropped {} object(s) this "
-        "session. A dropped object has no mesh and no collision, which in an "
-        "interior looks like the room vanishing and the floor giving way. Lower "
-        "LodMultiplier or FarClipOverride if you saw that.", drops);
+long DrawDistanceFix::SectorDrops() {
+    return InterlockedCompareExchange(&s_sectorDrops, 0, 0);
 }
+
 
 bool DrawDistanceFix::Install() {
     const auto& config = Config::Get().DrawDistance();
@@ -664,23 +643,6 @@ bool DrawDistanceFix::Install() {
         Patch::Nop("Distance Culling Bypass 2", kCullingEarlyOut2, vanillaCull2, sizeof(vanillaCull2));
     }
 
-    // 5. Global LOD Distance Multiplier Hook & Memory Write
-    s_customLodMult = mult;
-    Memory::Write<float>(kGlobalLodVar, s_customLodMult);
-
-    const uintptr_t hookAddr = reinterpret_cast<uintptr_t>(Hook_CameraInit);
-    const int32_t relOffset = static_cast<int32_t>(hookAddr - (kCameraInitHookSite + 5));
-
-    uint8_t patchBytes[6];
-    patchBytes[0] = 0xE9; // JMP rel32
-    std::memcpy(&patchBytes[1], &relOffset, 4);
-    patchBytes[5] = 0x90; // NOP
-
-    const uint8_t vanillaBytes[6] = { 0xD9, 0xE8, 0x53, 0x33, 0xDB, 0x56 };
-    if (Patch::Bytes("Camera LOD Multiplier Hook", kCameraInitHookSite, vanillaBytes, patchBytes, sizeof(patchBytes))) {
-        Logger::Get().Info("DrawDistanceFix", "Camera LOD Multiplier Hook installed (LOD scale: {:.2f}x).", s_customLodMult);
-    }
-
     // 6. Force High-Detail Models (No LOD Switching)
     if (config.forceHighDetailModels) {
         Logger::Get().Info("DrawDistanceFix", "Forcing high-detail models everywhere (disabling LOD mesh switching)...");
@@ -778,8 +740,6 @@ bool DrawDistanceFix::Install() {
         s_customFarClipFloat = static_cast<float>(s_customFarClip);
     }
     s_nearPlane = std::clamp(config.nearPlane, 0.05f, 10.0f);
-    {
-    }
     const uint8_t vanillaFrustum[21] = {
         0xD9, 0x42, 0x14,
         0xD9, 0x99, 0x18, 0x01, 0x00, 0x00,

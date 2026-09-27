@@ -185,18 +185,6 @@ long StabilityFix::GuardHits() {
     return InterlockedCompareExchange(&s_guardHits, 0, 0);
 }
 
-void StabilityFix::Report() {
-    const long hits = GuardHits();
-    if (hits == 0) {
-        Logger::Get().Info("StabilityFix",
-            "Heap free-list guards fired 0 times this session; the game never "
-            "reached the state that crashes unpatched.");
-    } else {
-        Logger::Get().Info("StabilityFix",
-            "Heap free-list guards fired {} time(s). Each one is a null "
-            "dereference the vanilla allocator would have performed.", hits);
-    }
-}
 
 bool StabilityFix::Install() {
     const auto& config = Config::Get().Stability();

@@ -13,8 +13,6 @@ public:
     // performed. Zero means the game never reached the bad state this session.
     static long GuardHits();
 
-    // Logs the guard count. Called once on unload.
-    static void Report();
 };
 
 } // namespace BullyDE

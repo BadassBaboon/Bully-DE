@@ -1,6 +1,8 @@
 #include "Diagnostics.h"
 #include "../Config.h"
 #include "../Logger.h"
+#include "DrawDistanceFix.h"
+#include "StabilityFix.h"
 #include <Windows.h>
 #include <cstdint>
 
@@ -95,9 +97,75 @@ DWORD WINAPI SampleThread(LPVOID) {
     return 0; // not reached; the loop runs for the life of the process
 }
 
+// ---------------------------------------------------------------------------
+// Counter watcher -- always on, unlike the post-FX sampler above.
+//
+// Two counters record damage the game does not otherwise report: objects the
+// visible-object list had to drop because it was full, and null dereferences
+// the heap guards caught. Both were previously only logged from
+// DLL_PROCESS_DETACH, which does not run when the process terminates -- and
+// quitting a game IS process termination, so neither ever appeared in a log.
+//
+// Polling them here means the evidence lands in the log while the game is
+// running, survives a crash, and carries a timestamp you can line up against
+// what you were doing at the time.
+// ---------------------------------------------------------------------------
+DWORD WINAPI WatchThread(LPVOID) {
+    long lastDrops = 0, lastHits = 0;
+    int dropQuiet = 0;
+
+    for (;;) {
+        Sleep(1000);
+        if (dropQuiet > 0) --dropQuiet;
+
+        long drops = 0, hits = 0;
+        __try {
+            drops = DrawDistanceFix::SectorDrops();
+            hits  = StabilityFix::GuardHits();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            continue;
+        }
+
+        if (drops > lastDrops && dropQuiet == 0) {
+            uint32_t area = 0;
+            __try { area = Peek<uint32_t>(kAreaId); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            Logger::Get().Warn("Diag",
+                "Visible-object list is full -- {} object(s) dropped so far (+{} since the "
+                "last report), current area {}. A dropped object has no mesh and no "
+                "collision, so this is what vanishing geometry and falling through floors "
+                "look like. Lower LodMultiplier or FarClipOverride.",
+                drops, drops - lastDrops, area);
+            lastDrops = drops;
+            dropQuiet = 10;   // at most one line every 10s while it keeps saturating
+        }
+        // While inside the quiet window lastDrops is deliberately left alone, so
+        // the next line reports the full delta rather than only the last second.
+
+        if (hits > lastHits) {
+            Logger::Get().Info("Diag",
+                "Heap free-list guards have now caught {} null dereference(s) that the "
+                "unpatched game would have performed.", hits);
+            lastHits = hits;
+        }
+    }
+    return 0; // not reached
+}
+
 } // namespace
 
 bool Diagnostics::Install() {
+    // The watcher runs regardless of LogPostFXState: it costs one sleeping
+    // thread and it is the only place these counters are ever reported.
+    HANDLE watch = CreateThread(nullptr, 0, &WatchThread, nullptr, 0, nullptr);
+    if (watch != nullptr) {
+        CloseHandle(watch);
+        Logger::Get().Info("Diag",
+            "Counter watch active: reporting dropped objects and heap guard hits as "
+            "they happen. If nothing from [Diag] follows this line, neither occurred.");
+    } else {
+        Logger::Get().Error("Diag", "Could not start the counter watch thread.");
+    }
+
     if (!Config::Get().Diagnostics().logPostFXState) {
         return true;
     }

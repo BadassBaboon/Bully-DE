@@ -6,8 +6,9 @@ class DrawDistanceFix {
 public:
     static bool Install();
 
-    // Logs how many objects the visible-object list had to drop. Called on unload.
-    static void Report();
+    // How many objects the visible-object list has had to drop this session.
+    static long SectorDrops();
+
 };
 
 } // namespace BullyDE
