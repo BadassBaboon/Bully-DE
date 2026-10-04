@@ -1,5 +1,48 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+**Model definition draw distance scaling (`ObjectDrawDistScale`).**
+Bullworth Academy's main building body, perimeter brick walls, gates, and trees
+previously disappeared at ~110m–120m, leaving only the distant tower spire proxy
+floating in the air. This occurred because `sub_451660` evaluates distance culling
+against `sub_5273E0`, which tests camera distance against `modelInfo->m_fDrawDistance * flt_C3CD00`.
+If the model definition draw distance authored in `.ide` files (`[modelInfo + 0x24]`)
+remains unscaled, `sub_5273E0` returns 0 beyond ~110m and the engine early-out culls
+the mesh.
+
+`CBaseModelInfo::SetDrawDistance` (`0x00527440`) is now hooked during `.ide` loading
+to scale definition draw distances for exterior models by `ObjectDrawDistScale`.
+
+**Real-time area transition and camera XYZ coordinate diagnostics.**
+`WatchThread` now tracks `kAreaId` (`0x00BD1008`) and Camera XYZ coordinates
+(`0x00C13F0C`, `0x00C13F10`, `0x00C13F14`), automatically logging every area
+transition with exact world coordinates. Added `LogPlayerCoordinates` under
+`[Diagnostics]` in `Bully-DE.ini` to periodically log Jimmy's position and area
+every 2 seconds. `ModelInfosScaled()` is also monitored live in the log.
+
+### Fixed
+
+**BMX Park (Area 62) floor dropout and void fall bug with increased draw distance.**
+Previously, scaling draw distances caused the BMX Park interior to collapse,
+dropping Jimmy through the floor into the void. This occurred because scaling
+interior model definition draw distances altered sector bounding box calculations
+in `sub_436C40` and caused `sub_452000` (`0x4523F5`) to fail its distance threshold
+and branch directly to `loc_452414` (`call sub_4667A0` — delete RenderWare mesh),
+unloading the track and floor beneath the player.
+
+`GetScaledDrawDist` now resolves model pointers against `CModelInfo::ms_modelInfoPtrs`
+(`0x00C67738`) using `IsInteriorModelId()`. All interior model definitions —
+specifically `tBMX.ide` (IDs 10296..10311), carnival minigames, school interior rooms,
+and town shops — are strictly excluded and retain 100% stock vanilla draw distances,
+preserving their bounding boxes and culling.
+
+Furthermore, runtime entity LOD culling hooks in `sub_451660` (`Hook_EntityDrawDist`
+and `Hook_Type4DrawDist`) now verify `ds:[0x00BD1008] == 0` (player outdoors) and
+`entityArea <= 1` before scaling, ensuring indoor spaces are never affected.
+
 ## 1.2.0
 
 ### Added
