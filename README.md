@@ -27,6 +27,12 @@ the default because draw distance is the most expensive setting here and the
 sector traversal caps insertions at 1999 per frame. Past that, distant geometry
 stops drawing rather than warning you.
 
+Exterior world geometry (buildings, campus walls, foliage) is pushed further
+out via `ObjectDrawDistScale`, which scales model definitions during `.ide`
+loading and instance culling in the render pass. Exterior models stay visible
+across the entire horizon, while interior models (such as the BMX Park, classrooms,
+and dorms) are strictly exempted to preserve vanilla collision and streaming stability.
+
 **Pedestrian population.** `PedPopScale` scales two separate things in memory
 after `PedPop.dat` is parsed: how far pedestrians spawn, and how many of them
 each area gets. Your own data file is still read normally and scaled on top, so a
@@ -77,6 +83,7 @@ it. The tables below are the summary.
 | `FarClipOverride` | `0.0` | `0` auto-computes `LodMultiplier x 300 m`, so 600 m at the shipped multiplier. |
 | `NearPlane` | `0.25` | The engine's own value. Raising it buys depth precision, since what causes Z-fighting is the far/near **ratio** and the timecycle's `NearFarRatio` column says 2500. At the shipped 600 m far clip you are already at 2400:1, so this only wants raising alongside a much larger `FarClipOverride`. It is not free: the near plane is where geometry starts being clipped, and cutscene cameras sit inside a metre of faces, so 1.0 clips through characters. Try 0.5 first. The log reports the ratio. |
 | `PedPopScale` | `2.0` | Scales pedestrian spawn ranges **and** per-area population counts. Minimum spawn radii are deliberately left alone, otherwise NPCs appear on top of the camera. This is the one setting that changes gameplay rather than rendering: it raises populations in interiors and scripted areas too. |
+| `ObjectDrawDistScale` | `2.0` | Scales definition and instance draw distances for all 1,402 exterior models (buildings, campus walls, foliage) so full geometry renders across the horizon. All interior models (BMX park, school classrooms, dorms, minigames, shops) are strictly excluded and retain 100% stock vanilla draw distances and bounding boxes. Range 1.0 - 6.0. |
 | `PedPoolSize` | `2048` | Vanilla 490. The loop bound follows at 2x automatically. |
 | `VehiclePoolSize` | `2048` | Vanilla 250. |
 | `ForceHighDetailModels` | `0` | Never drops to low-detail meshes. This bypasses the distance comparison entirely, so `LodMultiplier` stops affecting model switching while it is on. |
@@ -104,13 +111,19 @@ it. The tables below are the summary.
 | `BloomThreshold` / `BloomStrength` / `BloomScale` | `-1` | `-1` keeps the game's own per-area values (230 / 80 / 4). |
 | `EnableAAFixes` | `1` | Only does anything with MSAA actually enabled. |
 | `DisableDistanceFog` / `DisableMotionBlur` | `0` | Both ship off, so the game looks as it shipped. Read the note below on what "fog" actually is before turning it on. |
-| `LogPostFXState` | `0` | Read-only diagnostic. Samples the screen-effect gate state once a second and logs it when it changes. Patches nothing. |
 
 ### Stability
 
 | Setting | Default | Notes |
 |---|---|---|
 | `FixHeapFreeList` | `1` | Guards two heap routines that follow a linked-list neighbour and write through it without checking it exists. On a healthy list the guards never fire; the log says how many times they caught something. |
+
+### Diagnostics
+
+| Setting | Default | Notes |
+|---|---|---|
+| `LogPostFXState` | `0` | Read-only diagnostic. Samples the screen-effect gate state once a second and logs it when it changes. Patches nothing. |
+| `LogPlayerCoordinates` | `0` | Periodically logs camera world coordinates (XYZ) and Area ID every 2 seconds. Area transitions are always logged automatically regardless of this setting. |
 
 ## What "fog" means in this game
 
