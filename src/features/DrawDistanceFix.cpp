@@ -515,10 +515,222 @@ __declspec(naked) static void Hook_NiCameraFrustum() {
     }
 }
 
+// 11. Per-Object, ModelInfo, Entity LOD, and Clump Draw Distance Scaling
+//
+// Bully controls visibility and distance culling at multiple levels:
+//   a) sub_666F70 parses special/particle object definitions.
+//   b) sub_527440 (CBaseModelInfo::SetDrawDistance) assigns m_fDrawDistance ([ecx+24h])
+//      during IDE loading. sub_5273E0 and sub_527420 compare camera distance against this value.
+//      If [ecx+24h] is not scaled, sub_5273E0 returns 0 once camera distance exceeds 110m-120m,
+//      which causes sub_451660 to early-out cull world geometry (such as the Bullworth Academy
+//      main building body, walls, and trees, leaving only the distant spire proxy floating).
+//      Scaling exterior models here ensures full exterior geometry renders across the horizon.
+//      Interior models (especially BMX Park / Area 62 IDs 10296..10311) are strictly excluded,
+//      preserving vanilla bounding boxes in sub_436C40 and preventing interior floor unloads in sub_452000.
+//   c) sub_451660 at 0x00451B34 evaluates instance LOD culling ([esi+11Ch]).
+//   d) sub_451660 at 0x004519F3 checks Type 4 clump object draw distance ([edi+50h]).
+
+constexpr uintptr_t kObjectDefParseSite       = 0x006670B9;
+constexpr uintptr_t kSetModelInfoDrawDistSite = 0x00527440;
+constexpr uintptr_t kEntityDrawDistSite       = 0x00451B34;
+constexpr uintptr_t kType4DrawDistSite        = 0x004519F3;
+
+static float s_objectDrawDistScale = 1.0f;
+static volatile long s_objectsScaled = 0;
+static volatile long s_modelInfosScaled = 0;
+
+static void __stdcall ScaleObjectDef(uint8_t* base) {
+    if (base == nullptr || s_objectDrawDistScale <= 1.0f) {
+        return;
+    }
+    float* fLowDetail = reinterpret_cast<float*>(base + 8);
+    float* fMaxRadius = reinterpret_cast<float*>(base + 12);
+    float* fFadeDist  = reinterpret_cast<float*>(base + 16);
+
+    const float low = *fLowDetail;
+    if (low > 0.0f) {
+        *fLowDetail = low * s_objectDrawDistScale;
+        *fMaxRadius = (*fMaxRadius) * s_objectDrawDistScale;
+        *fFadeDist  = (*fFadeDist) * s_objectDrawDistScale;
+
+        InterlockedIncrement(&s_objectsScaled);
+    }
+}
+
+__declspec(naked) static void Hook_ObjectDefParsed() {
+    __asm {
+        pushad
+        push esi
+        call ScaleObjectDef
+        popad
+
+        // Execute original instructions:
+        add  esi, 0x14
+        push esi
+        push edi
+
+        // Resume at 0x006670BE (call sub_667680)
+        push 0x006670BE
+        ret
+    }
+}
+
+// Model ID classification:
+// Interior models must retain 100% stock vanilla draw distances.
+// Scaling interior models alters their bounding boxes in sub_436C40 and causes
+// sub_452000 to unload interior rooms/floors (such as the BMX Park void fall bug).
+static bool IsInteriorModelId(int id) {
+    if (id < 0) return true; // Safety default: do not scale unknowns
+
+    // BMX Park (Area 62, tBMX.ide) - CRITICAL: prevents floor dropout / void fall
+    if (id >= 10296 && id <= 10311) return true;
+
+    // Carnival Minigames (iballtos.ide, ishoot.ide)
+    if (id >= 7801 && id <= 7818) return true;
+    if (id >= 8001 && id <= 8019) return true;
+
+    // School interiors & interior props (ischool, classes, dorms, library, pool, etc.)
+    if (id >= 641 && id <= 1832) return true;
+    if (id >= 2046 && id <= 3269) return true;
+
+    // Town & Mission interiors
+    if (id >= 4436 && id <= 4501) return true; // Asylum (iasylum.ide)
+    if (id >= 8201 && id <= 9037) return true; // Barber, shops, chem, freaks, warehouse
+    if (id >= 9140 && id <= 9513) return true; // WareH, observ, races
+    if (id >= 9801 && id <= 9888) return true; // pAnimsI.ide
+    if (id >= 10450 && id <= 10453) return true; // p_cloth.ide
+    if (id >= 10621 && id <= 10845) return true; // Funhouse (ifunhous.ide, pfunhous.ide)
+    if (id >= 11210 && id <= 11419) return true; // Tenements, grocery, girls dorm
+    if (id >= 11604 && id <= 11675) return true; // Bookshop, boxing
+    if (id >= 11800 && id <= 11992) return true; // Trailer, salon, souvenir
+
+    return false;
+}
+
+static int GetModelId(uintptr_t modelInfo) {
+    if (!modelInfo) return -1;
+    auto** table = reinterpret_cast<uintptr_t**>(0x00C67738);
+    static int lastId = 0;
+
+    __try {
+        // Fast-path: check lastId and nearby consecutive entries first
+        if (lastId >= 0 && lastId < 14000 && table[lastId] == reinterpret_cast<uintptr_t*>(modelInfo)) {
+            return lastId;
+        }
+        for (int delta = 1; delta <= 10; ++delta) {
+            int check = lastId + delta;
+            if (check < 14000 && table[check] == reinterpret_cast<uintptr_t*>(modelInfo)) {
+                lastId = check;
+                return check;
+            }
+        }
+
+        // Full scan over CModelInfo pointers
+        for (int id = 0; id < 14000; ++id) {
+            if (table[id] == reinterpret_cast<uintptr_t*>(modelInfo)) {
+                lastId = id;
+                return id;
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+    return -1;
+}
+
+static float __stdcall GetScaledDrawDist(uintptr_t modelInfo, float vanillaDist) {
+    if (modelInfo == 0 || s_objectDrawDistScale <= 1.0f || vanillaDist <= 0.0f) {
+        return vanillaDist;
+    }
+
+    int id = GetModelId(modelInfo);
+    if (id >= 0 && !IsInteriorModelId(id)) {
+        InterlockedIncrement(&s_modelInfosScaled);
+        return vanillaDist * s_objectDrawDistScale;
+    }
+
+    return vanillaDist;
+}
+
+__declspec(naked) static void Hook_SetModelInfoDrawDist() {
+    __asm {
+        // ecx = CBaseModelInfo* (this)
+        // [esp+4] = float drawDistance
+        push eax
+        push ecx
+
+        push dword ptr [esp + 12] // float drawDistance
+        push ecx                  // modelInfo
+        call GetScaledDrawDist    // returns scaled float on st(0)
+
+        pop ecx
+        pop eax
+
+        fstp dword ptr [ecx + 0x24]
+        ret 4
+    }
+}
+
+__declspec(naked) static void Hook_EntityDrawDist() {
+    __asm {
+        // If player is not outdoors in Area 0, keep vanilla
+        cmp   dword ptr ds:[0x00BD1008], 0
+        jnz   loc_vanilla_entity
+
+        // Exterior entities have area byte 0 or 1 (area > 1 = interior)
+        cmp   byte ptr [esi + 0x111], 1
+        ja    loc_vanilla_entity
+
+        // Exterior entity in outdoor world: scale LOD draw distance
+        fld   dword ptr [esi + 0x11C]
+        fmul  dword ptr [s_objectDrawDistScale]
+        push  0x00451B3A
+        ret
+
+    loc_vanilla_entity:
+        fld   dword ptr [esi + 0x11C]
+        push  0x00451B3A
+        ret
+    }
+}
+
+__declspec(naked) static void Hook_Type4DrawDist() {
+    __asm {
+        // If player is not outdoors in Area 0, keep vanilla
+        cmp   dword ptr ds:[0x00BD1008], 0
+        jnz   loc_vanilla_type4
+
+        // Exterior entities have area byte 0 or 1 (area > 1 = interior)
+        cmp   byte ptr [esi + 0x111], 1
+        ja    loc_vanilla_type4
+
+        // Exterior entity in outdoor world: scale clump draw distance
+        fld   dword ptr [edi + 0x50]
+        fmul  dword ptr [s_objectDrawDistScale]
+        fstp  dword ptr [esp + 0x50]
+        push  0x004519FA
+        ret
+
+    loc_vanilla_type4:
+        fld   dword ptr [edi + 0x50]
+        fstp  dword ptr [esp + 0x50]
+        push  0x004519FA
+        ret
+    }
+}
+
 } // namespace
 
 long DrawDistanceFix::SectorDrops() {
     return InterlockedCompareExchange(&s_sectorDrops, 0, 0);
+}
+
+uint32_t DrawDistanceFix::ObjectsScaled() {
+    return static_cast<uint32_t>(InterlockedCompareExchange(&s_objectsScaled, 0, 0));
+}
+
+uint32_t DrawDistanceFix::ModelInfosScaled() {
+    return static_cast<uint32_t>(InterlockedCompareExchange(&s_modelInfosScaled, 0, 0));
 }
 
 
@@ -765,6 +977,47 @@ bool DrawDistanceFix::Install() {
                 "Far/near ratio {:.0f}:1 exceeds the 2500:1 the timecycle's NearFarRatio column "
                 "assumes. Expect Z-fighting on distant coplanar surfaces; raise NearPlane or "
                 "lower FarClipOverride.", ratio);
+        }
+    }
+
+    // 11. Per-Object, ModelInfo, Entity LOD, and Clump Draw Distance Scaling Hooks
+    if (config.objectDrawDistScale > 1.0f) {
+        s_objectDrawDistScale = std::clamp(config.objectDrawDistScale, 1.0f, 6.0f);
+
+        // 11a. sub_666F70 object definition parser
+        const uint8_t vanillaObjParse[5] = { 0x83, 0xC6, 0x14, 0x56, 0x57 };
+        if (Patch::Verify("Object def parse site", kObjectDefParseSite, vanillaObjParse, sizeof(vanillaObjParse))) {
+            InstallJmpHook(kObjectDefParseSite, Hook_ObjectDefParsed, 5);
+            Logger::Get().Info("DrawDistanceFix",
+                "Per-object draw distance parser hook installed @ 0x{:08X} ({:.2f}x).",
+                kObjectDefParseSite, s_objectDrawDistScale);
+        }
+
+        // 11b. sub_527440 CBaseModelInfo::SetDrawDistance hook (model definition draw distance for exterior models)
+        const uint8_t vanillaSetModelInfoDrawDist[10] = { 0xD9, 0x44, 0x24, 0x04, 0xD9, 0x59, 0x24, 0xC2, 0x04, 0x00 };
+        if (Patch::Verify("SetModelInfo draw dist site", kSetModelInfoDrawDistSite, vanillaSetModelInfoDrawDist, sizeof(vanillaSetModelInfoDrawDist))) {
+            InstallJmpHook(kSetModelInfoDrawDistSite, Hook_SetModelInfoDrawDist, 10);
+            Logger::Get().Info("DrawDistanceFix",
+                "ModelInfo draw distance definition hook installed @ 0x{:08X} ({:.2f}x, exterior-only).",
+                kSetModelInfoDrawDistSite, s_objectDrawDistScale);
+        }
+
+        // 11c. sub_451660 entity instance LOD distance culling hook (buildings, trees, world instances)
+        const uint8_t vanillaEntityDrawDist[6] = { 0xD9, 0x86, 0x1C, 0x01, 0x00, 0x00 };
+        if (Patch::Verify("Entity LOD draw dist site", kEntityDrawDistSite, vanillaEntityDrawDist, sizeof(vanillaEntityDrawDist))) {
+            InstallJmpHook(kEntityDrawDistSite, Hook_EntityDrawDist, 6);
+            Logger::Get().Info("DrawDistanceFix",
+                "Entity instance LOD draw distance culling hook installed @ 0x{:08X} ({:.2f}x, exterior-only).",
+                kEntityDrawDistSite, s_objectDrawDistScale);
+        }
+
+        // 11d. sub_451660 Type 4 clump object draw distance culling hook (props, animated objects)
+        const uint8_t vanillaType4DrawDist[7] = { 0xD9, 0x47, 0x50, 0xD9, 0x5C, 0x24, 0x50 };
+        if (Patch::Verify("Type 4 clump draw dist site", kType4DrawDistSite, vanillaType4DrawDist, sizeof(vanillaType4DrawDist))) {
+            InstallJmpHook(kType4DrawDistSite, Hook_Type4DrawDist, 7);
+            Logger::Get().Info("DrawDistanceFix",
+                "Type 4 clump object draw distance hook installed @ 0x{:08X} ({:.2f}x, exterior-only).",
+                kType4DrawDistSite, s_objectDrawDistScale);
         }
     }
 

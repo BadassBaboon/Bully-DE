@@ -33,6 +33,9 @@ namespace {
 constexpr uintptr_t kDispatcherGateA = 0x00BCBB53; // byte, non-zero = skip all post FX
 constexpr uintptr_t kDispatcherGateB = 0x00C1A998; // byte, non-zero = skip all post FX
 constexpr uintptr_t kAreaId          = 0x00BD1008; // read as int by the dispatcher
+constexpr uintptr_t kCameraX         = 0x00C13F0C; // Camera X
+constexpr uintptr_t kCameraY         = 0x00C13F10; // Camera Y
+constexpr uintptr_t kCameraZ         = 0x00C13F14; // Camera Z
 constexpr uintptr_t kBlurTextureSrc  = 0x00CF12EC; // gBlurTexture source object
 constexpr uintptr_t kBlurReadyFlag   = 0x00CF12E0; // set once the gaussian pass has run
 constexpr uintptr_t kBloomEnable     = 0x00AC7608; // dword, per-area, copied each frame
@@ -112,23 +115,33 @@ DWORD WINAPI SampleThread(LPVOID) {
 // ---------------------------------------------------------------------------
 DWORD WINAPI WatchThread(LPVOID) {
     long lastDrops = 0, lastHits = 0;
+    uint32_t lastObjects = 0, lastModelInfos = 0;
+    uint32_t lastArea = 0xFFFFFFFF;
     int dropQuiet = 0;
+    int coordTick = 0;
 
     for (;;) {
         Sleep(1000);
         if (dropQuiet > 0) --dropQuiet;
 
         long drops = 0, hits = 0;
+        uint32_t objects = 0, modelInfos = 0;
+        uint32_t area = 0;
+        float camX = 0.0f, camY = 0.0f, camZ = 0.0f;
         __try {
-            drops = DrawDistanceFix::SectorDrops();
-            hits  = StabilityFix::GuardHits();
+            drops      = DrawDistanceFix::SectorDrops();
+            hits       = StabilityFix::GuardHits();
+            objects    = DrawDistanceFix::ObjectsScaled();
+            modelInfos = DrawDistanceFix::ModelInfosScaled();
+            area       = Peek<uint32_t>(kAreaId);
+            camX       = Peek<float>(kCameraX);
+            camY       = Peek<float>(kCameraY);
+            camZ       = Peek<float>(kCameraZ);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             continue;
         }
 
         if (drops > lastDrops && dropQuiet == 0) {
-            uint32_t area = 0;
-            __try { area = Peek<uint32_t>(kAreaId); } __except (EXCEPTION_EXECUTE_HANDLER) {}
             Logger::Get().Warn("Diag",
                 "Visible-object list is full -- {} object(s) dropped so far (+{} since the "
                 "last report), current area {}. A dropped object has no mesh and no "
@@ -138,14 +151,48 @@ DWORD WINAPI WatchThread(LPVOID) {
             lastDrops = drops;
             dropQuiet = 10;   // at most one line every 10s while it keeps saturating
         }
-        // While inside the quiet window lastDrops is deliberately left alone, so
-        // the next line reports the full delta rather than only the last second.
 
         if (hits > lastHits) {
             Logger::Get().Info("Diag",
                 "Heap free-list guards have now caught {} null dereference(s) that the "
                 "unpatched game would have performed.", hits);
             lastHits = hits;
+        }
+
+        if (objects > lastObjects) {
+            Logger::Get().Info("Diag",
+                "Per-object draw distance scaling: {} object definition(s) scaled in memory so far.",
+                objects);
+            lastObjects = objects;
+        }
+
+        if (modelInfos > lastModelInfos) {
+            Logger::Get().Info("Diag",
+                "Model definition draw distance scaling: {} exterior model(s) scaled in memory so far.",
+                modelInfos);
+            lastModelInfos = modelInfos;
+        }
+
+        if (area != lastArea) {
+            if (lastArea != 0xFFFFFFFF) {
+                Logger::Get().Info("Diag",
+                    "Area transition: {} -> {} | Camera Pos: ({:.1f}, {:.1f}, {:.1f})",
+                    lastArea, area, camX, camY, camZ);
+            } else {
+                Logger::Get().Info("Diag",
+                    "Initial area: {} | Camera Pos: ({:.1f}, {:.1f}, {:.1f})",
+                    area, camX, camY, camZ);
+            }
+            lastArea = area;
+        }
+
+        if (Config::Get().Diagnostics().logPlayerCoordinates) {
+            if (++coordTick >= 2) {
+                coordTick = 0;
+                Logger::Get().Info("Diag",
+                    "Location sample: Area={} | Camera Pos: ({:.1f}, {:.1f}, {:.1f})",
+                    area, camX, camY, camZ);
+            }
         }
     }
     return 0; // not reached

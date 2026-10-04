@@ -122,6 +122,15 @@ void Config::Load(const std::filesystem::path& iniPath) {
             m_drawDist.nearPlane = 0.25f;
         }
     }
+
+    WCHAR objDistBuf[32]{ 0 };
+    if (GetPrivateProfileStringW(L"DrawDistance", L"ObjectDrawDistScale", L"2.0", objDistBuf, 32, pathW.c_str()) > 0) {
+        try {
+            m_drawDist.objectDrawDistScale = std::clamp(std::stof(objDistBuf), 1.0f, 6.0f);
+        } catch (...) {
+            m_drawDist.objectDrawDistScale = 2.0f;
+        }
+    }
     m_drawDist.extendCoronaBuffer = GetPrivateProfileIntW(L"DrawDistance", L"ExtendCoronaBuffer", 1, pathW.c_str()) != 0;
     m_drawDist.enableSectorOverflowGuard = GetPrivateProfileIntW(L"DrawDistance", L"EnableSectorOverflowGuard", 1, pathW.c_str()) != 0;
     m_drawDist.extendTerrainDrawDistance = GetPrivateProfileIntW(L"DrawDistance", L"ExtendTerrainDrawDistance", 1, pathW.c_str()) != 0;
@@ -140,6 +149,7 @@ void Config::Load(const std::filesystem::path& iniPath) {
 
     // [Diagnostics]
     m_diag.logPostFXState = GetPrivateProfileIntW(L"Diagnostics", L"LogPostFXState", 0, pathW.c_str()) != 0;
+    m_diag.logPlayerCoordinates = GetPrivateProfileIntW(L"Diagnostics", L"LogPlayerCoordinates", 0, pathW.c_str()) != 0;
 }
 
 void Config::Save(const std::filesystem::path& iniPath) {
@@ -175,6 +185,7 @@ void Config::Save(const std::filesystem::path& iniPath) {
     WritePrivateProfileStringW(L"DrawDistance", L"VehiclePoolSize", std::to_wstring(m_drawDist.vehiclePoolSize).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"PedPopScale", std::to_wstring(m_drawDist.pedPopScale).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"NearPlane", std::to_wstring(m_drawDist.nearPlane).c_str(), pathW.c_str());
+    WritePrivateProfileStringW(L"DrawDistance", L"ObjectDrawDistScale", std::to_wstring(m_drawDist.objectDrawDistScale).c_str(), pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"ExtendCoronaBuffer", m_drawDist.extendCoronaBuffer ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"EnableSectorOverflowGuard", m_drawDist.enableSectorOverflowGuard ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"DrawDistance", L"ExtendTerrainDrawDistance", m_drawDist.extendTerrainDrawDistance ? L"1" : L"0", pathW.c_str());
@@ -188,6 +199,7 @@ void Config::Save(const std::filesystem::path& iniPath) {
 
     WritePrivateProfileStringW(L"Stability", L"FixHeapFreeList", m_stability.fixHeapFreeList ? L"1" : L"0", pathW.c_str());
     WritePrivateProfileStringW(L"Diagnostics", L"LogPostFXState", m_diag.logPostFXState ? L"1" : L"0", pathW.c_str());
+    WritePrivateProfileStringW(L"Diagnostics", L"LogPlayerCoordinates", m_diag.logPlayerCoordinates ? L"1" : L"0", pathW.c_str());
 }
 
 } // namespace BullyDE

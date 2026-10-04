@@ -37,6 +37,7 @@ struct DrawDistanceSettings {
     uint32_t vehiclePoolSize{ 2048 };    // vanilla 250
     float pedPopScale{ 2.0f };           // scales PedPop.dat ranges in memory; 1.0 = off
     float nearPlane{ 0.25f };            // camera near plane; 0.25 is the engine default
+    float objectDrawDistScale{ 2.0f };   // scales per-object draw distances in sub_666F70 (LowDetailDistance, MaxRadius, FadeDistance)
     bool extendCoronaBuffer{ true };     // Expand corona / visible light slots from 56 to 1024
     bool enableSectorOverflowGuard{ true }; // Prevent sector list buffer overflow when draw distance is high
     bool extendTerrainDrawDistance{ true }; // Keep distant horizon cliffs, mountains, and landscape terrain visible
@@ -61,7 +62,8 @@ struct StabilitySettings {
 };
 
 struct DiagnosticsSettings {
-    bool logPostFXState{ false };    // Sample and log the screen-effect gate state each second
+    bool logPostFXState{ false };         // Sample and log the screen-effect gate state each second
+    bool logPlayerCoordinates{ false };   // Periodically sample and log camera/player XYZ coordinates and Area ID
 };
 
 struct GeneralSettings {
