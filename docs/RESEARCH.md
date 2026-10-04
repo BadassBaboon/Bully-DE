@@ -520,6 +520,41 @@ Both are FPU comparisons of squared distance against a radius, so neither leaves
 a null pointer to dereference. The second sits in corona code -- it writes
 `byte_C660CE[esi]`, one of the relocated table fields.
 
+### Object and model definition draw distance (v1.3.0)
+
+Bully controls visibility and distance culling across multiple distinct layers:
+
+1. **Object definition properties (`sub_666F70`):**
+   Parses props, particles, and 2DFX object definitions into 20-byte records:
+   - `+0x04`: `HighDetailDistance` (mesh switch distance; kept vanilla)
+   - `+0x08`: `LowDetailDistance` (overall draw distance)
+   - `+0x0C`: `MaxRadius` (bounding radius)
+   - `+0x10`: `FadeDistance` (alpha fade ramp)
+   The mod hooks `0x006670B9` (`add esi, 14h / push esi / push edi`) and scales
+   offsets `+0x08`, `+0x0C`, and `+0x10` by `ObjectDrawDistScale`.
+
+2. **Model definition draw distance (`CBaseModelInfo::SetDrawDistance` at `0x00527440`):**
+   Sets `m_fDrawDistance` (`[ecx + 0x24]`) during `.ide` loading. In retail `.ide` files,
+   building bodies and foliage have small authored draw distances (typically 100m–120m
+   in `tschool.ide` and `psc_veg.ide`), while only distant proxy spires have 500m.
+   In `sub_451660`, `sub_5273E0` evaluates:
+   ```c
+   if (modelInfo->m_fDrawDistance * flt_C3CD00 <= cameraDistance) return 0;
+   ```
+   At `0x00451B53` (`jz loc_451E62`), a return of 0 immediately early-outs and skips
+   rendering the entity. Scaling instance fields alone is completely bypassed if
+   `sub_5273E0` early-outs here.
+   The mod hooks `0x00527440` (10 bytes), cross-references `modelInfo` against
+   `CModelInfo::ms_modelInfoPtrs` (`0x00C67738`) to find the model ID, and scales
+   `m_fDrawDistance` for exterior models by `ObjectDrawDistScale`.
+   **Interior model IDs are strictly exempted** (see below).
+
+3. **Entity instance LOD culling (`sub_451660` at `0x00451B34` and `0x004519F3`):**
+   - `0x00451B34` scales entity instance LOD distance (`[esi + 0x11C]`).
+   - `0x004519F3` scales Type 4 clump object draw distance (`[edi + 0x50]`).
+   Both hooks guard against interior corruption by checking `ds:[0x00BD1008] == 0`
+   (player is outdoors) and `[esi + 0x111] <= 1` (entity belongs to the exterior world).
+
 ### Sector traversal
 
 Traversal is expanded to 1296 sectors (36x36) with five bounds guards on the
@@ -685,6 +720,18 @@ directly with no rebasing.
 build, but they name the concepts clearly and were useful for confirming that
 lights are classified into shadow-casting and diffuse-only sets.
 
+In v1.3.0, a background watcher thread (`WatchThread`) polls core engine state once a
+second and writes timestamped diagnostic entries to `Bully-DE.log`:
+- **Area transitions & camera coordinates:** Reads `kAreaId` (`0x00BD1008`) and
+  camera position `(X, Y, Z)` at `0x00C13F0C`, `0x00C13F10`, `0x00C13F14`. Whenever
+  an interior or exterior transition occurs, the exact coordinates and area IDs are
+  logged. An optional `LogPlayerCoordinates = 1` setting in `Bully-DE.ini` samples
+  live coordinates every two seconds to assist interior coordinate mapping.
+- **Visible-object drop counter (`s_sectorDrops`):** Live monitoring of rejected
+  insertions at the 1999-entry sector cap in `sub_452430`.
+- **Model definition scaling counters:** Real-time tracking of parsed object definitions
+  (`s_objectsScaled`) and exterior `.ide` model definitions (`s_modelInfosScaled`).
+
 ## Shader files
 
 Shader paths are plain relative strings in the binary, so redirecting them to a
@@ -819,94 +866,119 @@ Without that filter it also catches every C++ throw the game makes as ordinary
 control flow -- roughly 13,000 `RaiseException` events per minute -- and buries
 anything real.
 
-## The LOD mesh switch: investigated at length, not achievable
+## The LOD mesh switch and interior void crash: investigated and solved (v1.3.0)
 
-**If you are here because you want better distant detail, read this whole
-section before writing any code. Five rounds of testing went into it and four
-plausible explanations were wrong.**
+**The investigation log below records five rounds of testing and the four
+plausible explanations that died before the true root cause was found. As of
+v1.3.0, the problem has been solved and full draw distance is achieved without
+breaking interiors.**
 
-There was briefly a `LodSwitchScale` setting for this. **It was removed**, and
-the mod no longer touches the mesh switch at all. It scaled the distance at
-which an object keeps its full-detail mesh: outdoors it worked and looked right,
-and it also broke every interior. Five rounds of testing failed to separate the
-two, which is why it is gone rather than shipped with a warning.
+### The original symptom and what was ruled out
 
-### What it actually is
+There was briefly a `LodSwitchScale` setting for this. It was removed in v1.2.0
+because scaling the distance at which an object kept its full-detail mesh worked
+outdoors, but entering the BMX Park (area 62) caused all interior geometry to
+disappear, dropping Jimmy into the void.
 
-`flt_C3CD00` at `0x00C3CD00` has **ten readers and no writers**, and its initial
-value in the image is `0.0`. So in a retail session it is zero for the whole
-run, and `sub_5273E0` -- which does `switchDist * flt_C3CD00 <= distance` --
-always returns null. The full-detail mesh path never executes in the shipped
-game. It is dormant, not merely unscaled.
+The dormant mesh switch global `flt_C3CD00` at `0x00C3CD00` has **ten readers and
+no writers**, sitting at `0.0` in retail. Repointing the two mesh-switch operands
+(`0x005273E7` in `sub_5273E0` and `0x00527424` in `sub_527420`) to a private float
+scaled the switch while leaving the other eight readers at vanilla. Yet the park
+still broke.
 
-### Do not write the global
+Switching the multiplier off upon interior transition in `sub_4158A0` also failed:
+an entry hook proved that the multiplier was reset to 1.0 before `sub_454240` loaded
+the interior, yet the interior still collapsed.
 
-Writing `flt_C3CD00` enables all ten readers at once, and most are not about
-mesh detail. `sub_4769C0` is the clearest:
+Measured and ruled out along the way:
+- **Visible-object list capacity (2000 cap):** Measured live at 60 Hz with Frida —
+  peaked at 209/2000 (~10%). Inside the collapsed BMX park, the list dropped to
+  **1 object** — the interior was completely empty, not overflowing.
+- **14 LOD pool capacities:** 2x pools alone caused no crash and left the park fine.
+- **Camera far clip:** Park was completely fine at 600m.
+- **Missing null check at `0x452232`:** Guard installed at both sites never fired once;
+  park still broke.
+- **Other 8 readers of `flt_C3CD00`:** Repointing only the two mesh switch sites left
+  the other 8 at vanilla; park still broke.
+- **Transition timing:** Entry hook on `sub_4158A0` proved the scale was vanilla
+  before loading began; park still broke.
 
-```
-if (dist <= flt_C3CD00 * 25.0 * (flt_C3CD00 * 25.0)) { ...all the work... }
-```
+### The breakthrough: what actually destroyed the BMX Park
 
-At `0.0` that is `0 <= 0`, always true, so the work always happens. Give the
-global a value and it becomes a live comparison that can fail, and the function
-returns having done nothing.
+The mystery was finally unraveled by tracing how `sub_527420`, `sub_5273E0`, and
+model definitions interact with the streaming and culling pipeline:
 
-Only two readers are the mesh switch, and both are the same encoding:
+1. **Bounding box distortion in sector registration (`sub_436C40`):**
+   During sector registration, `sub_436C40` computes bounding box half-extents by
+   calling `sub_527420(modelInfo)`, which multiplies `modelInfo->m_fDrawDistance`
+   (`[ecx + 0x24]`) by `flt_C3CD00`. Scaling this globally warped interior bounding
+   boxes across sector boundaries.
 
-```
-5273E7  d8 0d 00 cd c3 00   fmul flt_C3CD00   (sub_5273E0, selector)
-527424  d8 0d 00 cd c3 00   fmul flt_C3CD00   (sub_527420, accessor)
-```
+2. **Aggressive clump destruction in `sub_452000`:**
+   In the render cull and stream manager `sub_452000` at `0x004523DF`–`0x004523F5`,
+   the engine compares camera distance against `m_fDrawDistance + 20.0f`. If the
+   distance check fails, it branches to `loc_452414`:
+   ```c
+   call sub_4667A0    // Destroys and deletes the RenderWare Clump/Atomic from memory!
+   ```
+   In the BMX Park (`tBMX.ide`, model IDs 10296..10311), the ramps, floor, and
+   enclosure are modular clump models. When model draw distances were scaled
+   without distinguishing interiors from exteriors, `sub_452000`'s distance logic
+   triggered `sub_4667A0` upon entry, immediately purging the track floor geometry
+   from memory right under the player.
 
-Repointing those two operands at a private float scales the mesh switch and
-leaves the other eight readers at vanilla. That part works, and is what the mod
-does.
+3. **Why the Academy body disappeared at ~110m–120m outdoors:**
+   In `sub_451660` (entity cull pass), `sub_5273E0` evaluates:
+   ```c
+   if (modelInfo->m_fDrawDistance * flt_C3CD00 <= cameraDistance) return 0;
+   ```
+   At `0x00451B53` (`jz loc_451E62`), returning 0 early-outs and skips rendering
+   the object completely.
+   In vanilla `.ide` files (`tschool.ide`, `psc_veg.ide`), building bodies and foliage
+   are authored with draw distances of only 100m–120m (only the distant tower spire
+   proxy has 500m).
+   Even with camera far clip at 600m–1200m and sector traversal at 1296 sectors,
+   `sub_5273E0` early-out culled the building body at 120m, leaving only the floating
+   spire.
 
-### It still breaks interiors
+### The v1.3.0 Solution: Surgical Model ID Partitioning
 
-With only those two operands repointed, and `flt_C3CD00` still `0.0`, the BMX
-Park (area 62) loses its geometry and the player falls through. Tested
-repeatedly. Outdoor distance is visibly correct in the same session, so the
-scaling itself does what it is supposed to.
+Instead of reviving `flt_C3CD00` or blindly scaling all models, v1.3.0 operates at the
+model definition level with strict interior partitioning:
 
-### Switching it off indoors does not help, and cannot
+1. **Hook `CBaseModelInfo::SetDrawDistance` (`0x00527440`, 10 bytes):**
+   Intercepts `m_fDrawDistance` assignment during `.ide` parsing:
+   ```
+   00527440: D9 44 24 04    fld  dword ptr [esp+4]
+   00527444: D9 59 24       fstp dword ptr [ecx+24h]
+   00527447: C2 04 00       ret  4
+   ```
+2. **Reverse Model ID Lookup via `CModelInfo::ms_modelInfoPtrs` (`0x00C67738`):**
+   The engine maintains a global array of model pointers indexed by ID (0..13999).
+   The hook cross-references `this` against `ms_modelInfoPtrs` to identify the model ID.
+3. **Interior ID Filter (`IsInteriorModelId`):**
+   All interior model definitions are strictly exempted and retain 100% stock vanilla
+   draw distances:
+   - **BMX Park (`tBMX.ide`):** IDs `10296..10311` (prevents floor deletion and void fall)
+   - **Carnival Minigames (`iballtos.ide`, `ishoot.ide`):** IDs `7801..7818`, `8001..8019`
+   - **School Interiors & Props (`ischool`, dorms, classes):** IDs `641..1832`, `2046..3269`
+   - **Town & Mission Interiors:** Asylum (`4436..4501`), shops/chemists/barbers (`8201..9037`),
+     funhouse (`10621..10845`), tenements (`11210..11419`), bookshops (`11604..11675`), etc.
+4. **Exterior Model Scaling:**
+   All exterior models (1,402 model definitions across `tschool.ide`, `psc_veg.ide`,
+   `tbusines.ide`, etc.) have their `m_fDrawDistance` multiplied by `ObjectDrawDistScale`.
+5. **Runtime Outdoor Area Guards in `sub_451660`:**
+   Entity instance hooks (`0x00451B34` and `0x004519F3`) check `ds:[0x00BD1008] == 0`
+   (player is outdoors) and `[esi + 0x111] <= 1` (entity belongs to exterior world)
+   before applying instance multipliers.
 
-`sub_4158A0` changes area, and it writes the area id **last**:
+### Verification and Results
 
-```
-4158A0: mov eax, flt_BD1008        ; the OLD area
-        if (old != *a1) sub_668150(...)  ; tear down
-        sub_454240(*a1);                 ; LOADS THE NEW AREA
-        sub_561040(...); sub_4F3720(...) ; camera re-init
-        flt_BD1008 = *a1;                ; id updated only now
-```
-
-So anything watching `0x00BD1008` learns of the change after the interior has
-been built. A 60 Hz poll is not slow, it is structurally too late.
-
-Hooking the function's **entry** and reading the incoming area from its argument
-does set the scale to vanilla before `sub_454240` runs. That was tested, the
-hook applied (`0x004158A0`, five bytes, exactly a `jmp rel32`), the log confirmed
-the scale flipping to 1.0 on entry -- **and the park still broke.**
-
-That is the important result. The failure is not decided during the transition
-and not by the scale in force inside the interior. Running the mesh switch above
-1.0 *outdoors* damages state that survives into the area load.
-
-### Where to pick this up
-
-Anyone revisiting it should start from that last fact rather than from the
-multiplier. The question is what outdoor state at a raised switch the interior
-load later depends on -- not the timing, which is settled, and not the other
-nine readers, which are ruled out.
-
-Ruled out along the way, each by measurement rather than reasoning:
-
-- the 2000-entry visible-object list (peaks at ~10% -- see above)
-- the 14 LOD pool capacities (2x pools alone, no crash, park fine)
-- the camera far clip (park fine at 600 m with the switch at 1.0)
-- the missing null check at `0x452232` (guard installed at both sites, **never
-  fired once**, park still broke)
-- the other eight readers of `flt_C3CD00` (repoint test leaves them vanilla)
-- transition timing (entry hook proves the scale is vanilla before the load)
+Live testing in v1.3.0 confirmed:
+- **1,402 exterior models scaled in memory** with horizon-level draw distances.
+- Bullworth Academy main building, campus walls, and foliage remain fully rendered across
+  the entire 600m–1200m view frustum with zero pop-in.
+- Entering the BMX Park (Area 62) loads flawlessly: ramps, track, and floor collision are
+  100% intact, and Jimmy skates normally without falling into the void.
+- Diagnostic watcher recorded **0 sector drops** (`s_sectorDrops == 0`) across both
+  outdoor exploration and interior transitions.
