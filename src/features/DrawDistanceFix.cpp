@@ -237,7 +237,27 @@ constexpr uintptr_t kCullingEarlyOut2 = 0x0051175E;
 // docs/RESEARCH.md before trying it again.
 
 // 5. Force High-Detail LOD Models
-constexpr uintptr_t kForceHighLodSite = 0x005273F4;
+// sub_5273E0 is also called by the streaming pass, where a non-null result
+// can lead to using an entity's RenderWare object before it has been created.
+// Override only the primary selection call in the render pass (sub_451660).
+constexpr uintptr_t kRenderModelCall = 0x00451B2F;
+
+__declspec(naked) static void SelectLoadedExteriorModel() {
+    __asm {
+        // At this call site ESI is the entity and ECX is its model info.
+        cmp dword ptr ds:[0x00BD1008], 0
+        jne vanilla
+        cmp byte ptr [esi + 0x111], 1
+        ja  vanilla
+        cmp dword ptr [esi + 0x18], 0
+        je  vanilla
+        mov eax, [ecx + 0x20]      // loaded model or null (normal LOD fallback)
+        ret 4                      // discard the camera distance argument
+    vanilla:
+        mov eax, 0x005273E0
+        jmp eax
+    }
+}
 
 // 6. Frustum Sector Traversal & Overflow Guard
 constexpr uintptr_t kAllSectorTraversalSite = 0x0045302D;
@@ -855,11 +875,16 @@ bool DrawDistanceFix::Install() {
         Patch::Nop("Distance Culling Bypass 2", kCullingEarlyOut2, vanillaCull2, sizeof(vanillaCull2));
     }
 
-    // 5. Force High-Detail Models (No LOD Switching)
+    // 5. Prefer loaded high-detail models in the exterior render pass.
     if (config.forceHighDetailModels) {
-        Logger::Get().Info("DrawDistanceFix", "Forcing high-detail models everywhere (disabling LOD mesh switching)...");
-        const uint8_t vanillaHighLod[] = { 0x75, 0x06 };
-        Patch::Nop("Force High Detail Models", kForceHighLodSite, vanillaHighLod, sizeof(vanillaHighLod));
+        const uint8_t vanillaCall[] = { 0xE8, 0xAC, 0x58, 0x0D, 0x00 };
+        if (Patch::Verify("High-detail render call", kRenderModelCall, vanillaCall, sizeof(vanillaCall))) {
+            if (Memory::WriteCall(kRenderModelCall, reinterpret_cast<uintptr_t>(&SelectLoadedExteriorModel))) {
+                Logger::Get().Info("DrawDistanceFix", "Preferring loaded high-detail exterior models.");
+            } else {
+                Logger::Get().Error("DrawDistanceFix", "Failed to install the high-detail render call.");
+            }
+        }
     }
 
     // 6. Frustum Sector Traversal & Overflow Guard
@@ -903,22 +928,7 @@ bool DrawDistanceFix::Install() {
 
     // 7. Corona / Visible Light Table Expansion (56 -> 1024)
     if (config.extendCoronaBuffer) {
-        Logger::Get().Info("DrawDistanceFix", "Expanding Corona/Light table from 56 to 1024 slots...");
-        DWORD oldProtect = 0;
-        if (VirtualProtect(reinterpret_cast<LPVOID>(0x020F4000), 0x20000, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-            std::memset(reinterpret_cast<void*>(0x020F4000), 0, 0x20000);
-
-            size_t applied = 0;
-            for (size_t i = 0; i < kCoronaPatchesCount; ++i) {
-                const auto& cp = kCoronaPatches[i];
-                if (Patch::Bytes("Corona patch", cp.address, cp.vanilla, cp.patched, cp.size)) {
-                    applied++;
-                }
-            }
-            Logger::Get().Info("DrawDistanceFix", "Applied {}/{} corona table expansion patches.", applied, kCoronaPatchesCount);
-        } else {
-            Logger::Get().Error("DrawDistanceFix", "Failed to unprotect .bind memory for corona table @ 0x020F4000.");
-        }
+        InstallCoronaPatches();
     }
 
     // 8. Horizon Cliff & Mountain Terrain Draw Distance

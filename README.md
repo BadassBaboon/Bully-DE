@@ -86,7 +86,7 @@ it. The tables below are the summary.
 | `ObjectDrawDistScale` | `2.0` | Scales definition and instance draw distances for all 1,402 exterior models (buildings, campus walls, foliage) so full geometry renders across the horizon. All interior models (BMX park, school classrooms, dorms, minigames, shops) are strictly excluded and retain 100% stock vanilla draw distances and bounding boxes. Range 1.0 - 6.0. |
 | `PedPoolSize` | `2048` | Vanilla 490. The loop bound follows at 2x automatically. |
 | `VehiclePoolSize` | `2048` | Vanilla 250. |
-| `ForceHighDetailModels` | `0` | Never drops to low-detail meshes. This bypasses the distance comparison entirely, so `LodMultiplier` stops affecting model switching while it is on. |
+| `ForceHighDetailModels` | `0` | Prefers high-detail meshes for already-loaded exterior entities while outdoors. District streaming and interiors use the game's normal model selection. |
 | `ExtendCoronaBuffer`, `EnableSectorOverflowGuard`, `ExtendTerrainDrawDistance` | `1` | Parts of the same coordinated set. |
 | `BypassDistanceCulling` | `0` | Ships off. It removes the distance test guarding the corona slot table, and that table silently drops coronas when it is full, so 2DFX flicker on and off. A bigger `ExtendCoronaBuffer` does not help. |
 | `FilterRadarPedBlips` | `0` | Stops distant ambient NPCs cluttering the minimap. |

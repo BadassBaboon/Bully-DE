@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+- Scoped `ForceHighDetailModels` to rendering loaded exterior entities. The
+  game uses its normal model selection while streaming across districts.
+- Moved the expanded corona table into the ASI. This removes the dependency
+  on writable packer memory reported in issue #4. If any expansion site fails
+  verification or cannot be written, the installer skips the entire expansion.
+
 ## 1.3.0
 
 ### Added

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that every reference to the corona table is relocated.
 
-The corona table is moved from 0x00C660A0 to unused space and expanded from 56
+The corona table is moved from 0x00C660A0 into the ASI and expanded from 56
 slots to 1024. That only works if EVERY instruction referencing the table is
 repointed. Miss one and it keeps reading the old location, which nothing writes
 any more, so it reads zeros -- the symptom is corona effects silently
@@ -51,14 +51,30 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PATCH_SRC = os.path.join(HERE, "..", "src", "features", "CoronaPatches.cpp")
 
 
-def patched_bytes():
-    src = open(PATCH_SRC, encoding="utf-8").read()
-    entries = re.findall(r"^\s*\{\s*(0x[0-9A-Fa-f]{8})\s*,\s*(\d+)\s*,", src, re.M)
+def check_patch_sites(data):
+    with open(PATCH_SRC, encoding="utf-8") as f:
+        src = f.read()
+    entries = re.findall(r"^\s*(Field|Limit|ClearLoop)\((0x[0-9A-Fa-f]+)([^)]*)\),", src, re.M)
     covered = set()
-    for addr, size in entries:
-        base = int(addr, 16)
-        covered.update(range(base, base + int(size)))
-    return len(entries), covered
+    mismatches = []
+    for kind, address, args in entries:
+        addr = int(address, 16)
+        args = [arg.strip() for arg in args.split(",") if arg.strip()]
+        if kind == "Field":
+            offset = int(args[0], 16)
+            if args[1:] == ["true"]:
+                offset += 56 * 0x30
+            expected = struct.pack("<I", TABLE_LO + offset)
+            covered.add(addr)
+        elif kind == "Limit":
+            expected = struct.pack("<H", 56 - (int(args[0]) if args else 0))
+        else:
+            expected = bytes.fromhex("8D 4B 38 B8 AC 60 C6 00 5B 8D 49 00")
+            covered.add(addr + 4)
+        start = addr - IMAGE_BASE
+        if data[start:start + len(expected)] != expected:
+            mismatches.append(addr)
+    return len(entries), covered, mismatches
 
 
 def main():
@@ -68,8 +84,10 @@ def main():
         print("set [General] DumpUnpackedBinary = 1 in the INI and launch once to produce it")
         return 2
 
-    count, covered = patched_bytes()
     data = open(dump, "rb").read()
+    count, covered, mismatches = check_patch_sites(data)
+    for addr in mismatches:
+        print(f"vanilla signature mismatch at 0x{addr:08X}")
 
     refs, missed = 0, []
     for off in range(TEXT_LO - IMAGE_BASE, TEXT_HI - IMAGE_BASE - 4):
@@ -94,6 +112,8 @@ def main():
         print("automatically a field access; it may be a loop bound or sentinel.")
         return 1
 
+    if mismatches:
+        return 1
     print("\nall corona table references are relocated")
     return 0
 

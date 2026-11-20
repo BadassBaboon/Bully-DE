@@ -586,16 +586,11 @@ its own clearing loop:
 510E6C: jnz short loc_510E60
 ```
 
-It is relocated to `0x020F4000` and expanded to 1024 slots by 97 patches: field
-base pointers move from `0x00C660xx` to `0x020F40xx`, bounds move from `0x38`
-(56) to `0x400` (1024), and a count-1 bound at `0x8DD4A3` moves from 55 to 1023.
-`1024 * 0x30 = 0xC000`, which is exactly the gap to the secondary table at
-`0x02100000`; `0x20000` is cleared to cover both.
-
-`0x020F4000` is dead space at the tail of the image left by the packer. It has
-no cross-references anywhere in the binary, and the region reads as zeros from
-`0x020E0000` through `0x02140000`. The image spans `0x400000`-`0x2146000`, so
-the whole relocation is inside mapped memory.
+The ASI owns a zero-initialized array of 1024 slots. The 98 patch sites include
+the clearing loop, field operands, bounds and the update loop's end comparison.
+The operand at `0x511113` holds the table base plus `1024 * 0x30 + 0x2C`, the
+value reached after advancing past the last slot. The installer verifies every
+signature and acquires write access to every site before changing any operands.
 
 ### MSAA and vegetation
 
